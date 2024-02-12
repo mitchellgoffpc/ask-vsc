@@ -1,26 +1,49 @@
-// The module 'vscode' contains the VS Code extensibility API
-// Import the module and reference it with the alias vscode in your code below
 import * as vscode from 'vscode';
+import * as fs from 'fs';
+import * as child_process from 'child_process';
 
-// This method is called when your extension is activated
-// Your extension is activated the very first time the command is executed
 export function activate(context: vscode.ExtensionContext) {
+    console.log('Congratulations, your extension "ask-vsc" is now active!');
 
-	// Use the console to output diagnostic information (console.log) and errors (console.error)
-	// This line of code will only be executed once when your extension is activated
-	console.log('Congratulations, your extension "ask-vsc" is now active!');
+    context.subscriptions.push(vscode.commands.registerCommand('ask-vsc.ask', () => {
+        vscode.window.showInputBox({ prompt: 'Enter your question' }).then(question => {
+            if (question) {
+                fs.writeFileSync('/tmp/.message', question);
+                child_process.exec('cat /tmp/.message | ask', (error, stdout, stderr) => {
+                    vscode.window.showInformationMessage(stdout);
+                });
+            }
+        });
+    }));
 
-	// The command has been defined in the package.json file
-	// Now provide the implementation of the command with registerCommand
-	// The commandId parameter must match the command field in package.json
-	let disposable = vscode.commands.registerCommand('ask-vsc.helloWorld', () => {
-		// The code you place here will be executed every time your command is executed
-		// Display a message box to the user
-		vscode.window.showInformationMessage("Yo what's up");
-	});
-
-	context.subscriptions.push(disposable);
+    context.subscriptions.push(vscode.commands.registerCommand('ask-vsc.modify', () => {
+        vscode.window.showInputBox({ prompt: 'Enter your question' }).then(question => {
+            if (question) {
+                fs.writeFileSync('/tmp/.message', question);
+                child_process.exec('cat /tmp/.message | ask', (error, stdout, stderr) => {
+                    const activeEditor = vscode.window.activeTextEditor;
+                    if (activeEditor) {
+                        const selection = activeEditor.selection;
+                        const selectedText = activeEditor.document.getText(selection);
+                        vscode.workspace.openTextDocument({ content: stdout }).then(doc => {
+                            vscode.commands.executeCommand('vscode.diff',
+                                activeEditor.document.uri,
+                                doc.uri,
+                                `Diff: Original vs. Modified`,
+                                { preview: true, viewColumn: vscode.ViewColumn.Beside }
+                            );
+                        }).then(() => {
+                            vscode.commands.registerCommand('type', (event) => {
+                                if (event.text === '\n') {
+                                    vscode.window.showInformationMessage("yay");
+                                }
+                            });
+                        });
+                    }
+                });
+            }
+        });
+    }));
 }
 
-// This method is called when your extension is deactivated
 export function deactivate() {}

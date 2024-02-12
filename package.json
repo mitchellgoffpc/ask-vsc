@@ -14,15 +14,29 @@
   "contributes": {
     "keybindings": [
       {
-        "command": "ask-vsc.helloWorld",
+        "command": "ask-vsc.ask",
         "key": "ctrl+x a",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "ask-vsc.modify",
+        "key": "ctrl+x i",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "ask-vsc.modify",
+        "key": "ctrl+x m",
         "when": "editorTextFocus"
       }
     ],
     "commands": [
       {
-        "command": "ask-vsc.helloWorld",
-        "title": "Hello World"
+        "command": "ask-vsc.ask",
+        "title": "Ask"
+      },
+      {
+        "command": "ask-vsc.modify",
+        "title": "Modify"
       }
     ]
   },
