@@ -3,6 +3,7 @@
   "displayName": "ask-vsc",
   "description": "Query ChatGPT directly from VSCode",
   "version": "0.0.1",
+  "repository": "https://github.com/mitchellgoffpc/ask-vsc",
   "engines": {
     "vscode": "^1.86.0"
   },
