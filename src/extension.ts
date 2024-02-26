@@ -103,6 +103,44 @@ function query(prompt: string): Promise<string> {
     });
 }
 
+function displayDiff(editor: vscode.TextEditor, selectedRange: vscode.Range, diff: string): void {
+    const diffLines = diff.split('\n');
+    let insertLines: string[] = [];
+    let deleteStart = 0;
+    let deleteCount = 0;
+    diffLines.forEach((line) => {
+        if (line.startsWith('@@')) {
+            const match = line.match(/\-(\d+),(\d+) \+(\d+),(\d+)/);
+            if (match) {
+                deleteStart = parseInt(match[1], 10) - 1; // Adjusting because editor lines are 0-based
+                deleteCount = parseInt(match[2], 10);
+            }
+        } else if (line.startsWith('+') && !line.startsWith('+++')) {
+            insertLines.push(line.substring(1) + '\n');
+        }
+    });
+
+    const insertPosition = selectedRange.start.translate(deleteStart + deleteCount, 0);
+    editor.edit(editBuilder => {
+        editBuilder.insert(insertPosition, insertLines.join(''));
+    });
+
+    const deleteDecorationType = vscode.window.createTextEditorDecorationType({
+        isWholeLine: true,
+        backgroundColor: 'rgba(255, 0, 0, 0.3)',
+    });
+    const insertDecorationType = vscode.window.createTextEditorDecorationType({
+        isWholeLine: true,
+        backgroundColor: 'rgba(0, 255, 0, 0.3)',
+    });
+
+    const deleteRange = new vscode.Range(selectedRange.start.translate(deleteStart), selectedRange.start.translate(deleteStart + deleteCount - 1));
+    const insertRange = new vscode.Range(insertPosition, insertPosition.translate(insertLines.length - 1)) ;
+
+    editor.setDecorations(deleteDecorationType, [deleteRange]);
+    editor.setDecorations(insertDecorationType, [insertRange]);
+}
+
 
 // API functions
 
@@ -168,6 +206,8 @@ async function modify () {
                 preserveFocus: true,
                 viewColumn: vscode.ViewColumn.Beside
             });
+
+            displayDiff(activeEditor, selectedRange, stdout);
         });
 
         const selectedOption = await vscode.window.showInformationMessage(
