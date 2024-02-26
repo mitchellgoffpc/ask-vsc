@@ -203,11 +203,91 @@ const answerProvider = new class implements vscode.TextDocumentContentProvider {
 };
 
 
+// Ask view
+
+function getNonce() {
+	let text = '';
+	const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+	for (let i = 0; i < 32; i++) {
+		text += possible.charAt(Math.floor(Math.random() * possible.length));
+	}
+	return text;
+}
+
+class ChatViewProvider implements vscode.WebviewViewProvider {
+	private view?: vscode.WebviewView;
+
+	constructor(private extensionUri: vscode.Uri) { }
+
+	resolveWebviewView(
+		view: vscode.WebviewView,
+		context: vscode.WebviewViewResolveContext,
+		token: vscode.CancellationToken,
+	) {
+		this.view = view;
+
+		view.webview.options = {
+			enableScripts: true,
+			localResourceRoots: [this.extensionUri]
+		};
+
+		view.webview.html = this.getHtmlForWebview(view.webview);
+
+		view.webview.onDidReceiveMessage(data => {
+			if (data.type === 'colorSelected') {
+				vscode.window.activeTextEditor?.insertSnippet(new vscode.SnippetString(`#${data.value}`));
+			}
+		});
+	}
+
+	getHtmlForWebview(webview: vscode.Webview): string {
+		// Get the local path to main script run in the webview, then convert it to a uri we can use in the webview.
+		const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'media', 'main.js'));
+		const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'media', 'main.css'));
+        const codiconsUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'node_modules', '@vscode/codicons', 'dist', 'codicon.css'));
+
+		// Use a nonce to only allow a specific script to be run.
+		const nonce = getNonce();
+
+		return `
+            <!DOCTYPE html>
+                <html lang="en">
+                <head>
+                    <meta charset="UTF-8">
+                    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; font-src ${webview.cspSource}; style-src ${webview.cspSource}; script-src 'nonce-${nonce}';">
+                    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+                    <link href="${styleUri}" rel="stylesheet">
+                    <link href="${codiconsUri}" rel="stylesheet">
+                </head>
+                <body>
+                    <div class="chat">
+                        Some content
+                    </div>
+
+                    <div class="chat-input">
+                        <textarea placeholder="Ask a question!" class="chat-message"></textarea>
+                        <div class="chat-send">
+                            <i class="codicon codicon-send"></i>
+                        </div>
+                    </div>
+
+                    <script nonce="${nonce}" src="${scriptUri}"></script>
+                </body>
+            </html>`;
+	}
+}
+
+
 // Register commands
 
 export function activate(context: vscode.ExtensionContext) {
+    const chatViewProvider = new ChatViewProvider(context.extensionUri);
+    const chatViewOptions = {}; // webviewOptions: { retainContextWhenHidden: true }};
+
     context.subscriptions.push(vscode.commands.registerCommand('ask-vsc.ask', ask));
     context.subscriptions.push(vscode.commands.registerCommand('ask-vsc.modify', modify));
     context.subscriptions.push(vscode.workspace.registerTextDocumentContentProvider('answer', answerProvider));
+    context.subscriptions.push(vscode.window.registerWebviewViewProvider('ask-vsc.chat-view', chatViewProvider, chatViewOptions));
 }
 export function deactivate() {}
