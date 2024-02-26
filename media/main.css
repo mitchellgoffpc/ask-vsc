@@ -1,11 +1,14 @@
 :root {
     --container-padding-vertical: 10px;
-	--container-paddding-horizontal: 20px;
+	--container-padding-horizontal: 20px;
 	--input-padding-vertical: 10px;
 	--input-padding-horizontal: 6px;
 	--input-margin-vertical: 4px;
-	--input-margin-horizontal: 0;
     --input-line-height: 1.5em;
+	--message-padding-vertical: 10px;
+	--message-padding-horizontal: 20px;
+	--message-margin-vertical: 5px;
+    --message-line-height: 1.5em;
 }
 
 html {
@@ -13,7 +16,7 @@ html {
 }
 
 body {
-	padding: var(--container-padding-vertical) var(--container-paddding-horizontal);
+	padding: var(--container-padding-vertical) 0;
 	color: var(--vscode-foreground);
 	font-size: var(--vscode-font-size);
 	font-weight: var(--vscode-font-weight);
@@ -27,7 +30,7 @@ body {
 
 ol,
 ul {
-	padding-left: var(--container-paddding-horizontal);
+	padding-left: var(--container-padding-horizontal);
 }
 
 body > *,
@@ -52,6 +55,7 @@ a:active {
 code {
 	font-size: var(--vscode-editor-font-size);
 	font-family: var(--vscode-editor-font-family);
+	background-color: transparent;
 }
 
 button {
@@ -95,42 +99,88 @@ textarea {
 	background-color: var(--vscode-input-background);
     border-radius: 3px;
 }
+input::placeholder,
+textarea::placeholder {
+	color: var(--vscode-input-placeholderForeground);
+}
 
 textarea {
     padding: 0;
     resize: none;
     max-height: 15em;
 }
-
 textarea::-webkit-scrollbar {
     width: 0 !important;
 }
 
-input::placeholder,
-textarea::placeholder {
-	color: var(--vscode-input-placeholderForeground);
-}
+/* Chat output */
 
-body .chat {
+.chat {
     flex-grow: 1;
 }
 
-body .chat-input {
+.chat .chat-placeholder {
+	padding: 0 var(--container-padding-horizontal);
+	color: var(--vscode-editor-foreground);
+}
+
+.chat .chat-message {
+	display: flex;
+	flex-direction: column;
+	align-items: stretch;
+	padding: var(--message-padding-vertical) var(--message-padding-horizontal);
+	border-bottom: 3px solid var(--vscode-editor-background);
+	color: var(--vscode-editor-foreground);
+}
+.chat .chat-message:first-of-type {
+	padding-top: 0;
+}
+.chat .chat-message:last-of-type {
+	border-bottom: none;
+}
+
+.chat .chat-message .chat-header {
+	padding-bottom: 10px;
+	font-weight: 600;
+}
+
+.chat .chat-message .chat-code {
+	max-width: 100%;
+	overflow-x: scroll;
+	overflow-y: hidden;
+}
+
+.chat .chat-message .chat-code code span {
+	display: block;
+    white-space: nowrap;
+	color: var(--vscode-editor-foreground);
+}
+.chat .chat-message .chat-code code span.add {
+	color: #98c379;
+}
+.chat .chat-message .chat-code code span.remove {
+	color: #e06c75;
+}
+
+/* Chat input */
+
+.chat-input {
     display: flex;
     flex-direction: row;
     align-items: center;
     justify-content: space-between;
     padding: var(--input-padding-vertical) var(--input-padding-horizontal);
+	margin: 0 var(--container-padding-horizontal);
     background-color: var(--vscode-input-background);
     border-radius: 3px;
 }
 
-body .chat-input textarea {
+.chat-input textarea {
     flex-grow: 1;
     background-color: transparent;
 }
 
-body .chat-input .chat-send .codicon {
+.chat-input .chat-send .codicon {
     padding-left: var(--input-padding-horizontal);
     vertical-align: middle;
 }
