@@ -167,34 +167,34 @@ async function modify(question: string): Promise<[string, string]> {
 // Ask sidebar
 
 function getNonce() {
-	let text = '';
-	const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-	for (let i = 0; i < 32; i++) {
-		text += possible.charAt(Math.floor(Math.random() * possible.length));
-	}
-	return text;
+    let text = '';
+    const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+    for (let i = 0; i < 32; i++) {
+        text += possible.charAt(Math.floor(Math.random() * possible.length));
+    }
+    return text;
 }
 
 class ChatViewProvider implements vscode.WebviewViewProvider {
-	private view?: vscode.WebviewView;
+    private view?: vscode.WebviewView;
 
-	constructor(private extensionUri: vscode.Uri) { }
+    constructor(private extensionUri: vscode.Uri) { }
 
-	resolveWebviewView(
-		view: vscode.WebviewView,
-		context: vscode.WebviewViewResolveContext,
-		token: vscode.CancellationToken,
-	) {
-		this.view = view;
+    resolveWebviewView(
+        view: vscode.WebviewView,
+        context: vscode.WebviewViewResolveContext,
+        token: vscode.CancellationToken,
+    ) {
+        this.view = view;
 
-		view.webview.options = {
-			enableScripts: true,
-			localResourceRoots: [this.extensionUri]
-		};
+        view.webview.options = {
+            enableScripts: true,
+            localResourceRoots: [this.extensionUri]
+        };
 
-		view.webview.html = this.getHtmlForWebview(view.webview);
+        view.webview.html = this.getHtmlForWebview(view.webview);
 
-		view.webview.onDidReceiveMessage(async data => {
+        view.webview.onDidReceiveMessage(async data => {
             if (data.command === 'send') {
                 this.view?.webview.postMessage({ command: 'message', role: "user", value: data.value });
                 const [response, replacement] = await modify(data.value);
@@ -208,19 +208,19 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
                     });
                 }
             }
-		});
-	}
+        });
+    }
 
-	getHtmlForWebview(webview: vscode.Webview): string {
-		// Get the local path to main script run in the webview, then convert it to a uri we can use in the webview.
-		const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'media', 'main.js'));
-		const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'media', 'main.css'));
+    getHtmlForWebview(webview: vscode.Webview): string {
+        // Get the local path to main script run in the webview, then convert it to a uri we can use in the webview.
+        const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'media', 'main.js'));
+        const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'media', 'main.css'));
         const codiconsUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'node_modules', '@vscode/codicons', 'dist', 'codicon.css'));
 
-		// Use a nonce to only allow a specific script to be run.
-		const nonce = getNonce();
+        // Use a nonce to only allow a specific script to be run.
+        const nonce = getNonce();
 
-		return `
+        return `
             <!DOCTYPE html>
                 <html lang="en">
                 <head>
@@ -248,7 +248,7 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
                     <script nonce="${nonce}" src="${scriptUri}"></script>
                 </body>
             </html>`;
-	}
+    }
 }
 
 
