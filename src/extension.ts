@@ -229,8 +229,8 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
 
     getHtmlForWebview(webview: vscode.Webview): string {
         // Get the local path to main script run in the webview, then convert it to a uri we can use in the webview.
-        const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'media', 'main.js'));
-        const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'media', 'main.css'));
+        const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'src', 'webview', 'main.js'));
+        const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'src', 'webview', 'main.css'));
         const codiconsUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'node_modules', '@vscode/codicons', 'dist', 'codicon.css'));
 
         // Use a nonce to only allow a specific script to be run.
