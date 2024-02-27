@@ -180,35 +180,51 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
 
     constructor(private extensionUri: vscode.Uri) { }
 
+    ask = () => {
+        this.view?.webview.postMessage({ command: 'focus', value: '/ask ' });
+    };
+    modify = () => {
+        this.view?.webview.postMessage({ command: 'focus', value: '' });
+    };
+
+    handleMessage = async (data: any) => {
+        if (data.command === 'send') {
+            this.view?.webview.postMessage({ command: 'clear' });
+            if (data.value.startsWith('/ask ')) {
+                const message = data.value.slice(5);
+                this.view?.webview.postMessage({ command: 'message', role: "user", value: message });
+                const response = await ask(message);
+                this.view?.webview.postMessage({ command: 'message', role: "agent", value: response });
+            } else {
+                this.view?.webview.postMessage({ command: 'message', role: "user", value: data.value });
+                const [response, replacement] = await modify(data.value);
+                this.view?.webview.postMessage({ command: 'message', role: "agent", diff: response, replacement: replacement });
+            }
+        } else if (data.command === "approve") {
+            this.view?.webview.postMessage({ command: 'clear' });
+            let activeEditor = vscode.window.activeTextEditor;
+            if (activeEditor) {
+                let [selectedRange, _] = getSelectedText(activeEditor);
+                activeEditor.edit(editBuilder => {
+                    editBuilder.replace(selectedRange, data.value);
+                });
+                vscode.window.showTextDocument(activeEditor.document, activeEditor.viewColumn);
+            }
+        }
+    };
+
     resolveWebviewView(
         view: vscode.WebviewView,
         context: vscode.WebviewViewResolveContext,
         token: vscode.CancellationToken,
     ) {
         this.view = view;
-
         view.webview.options = {
             enableScripts: true,
             localResourceRoots: [this.extensionUri]
         };
-
         view.webview.html = this.getHtmlForWebview(view.webview);
-
-        view.webview.onDidReceiveMessage(async data => {
-            if (data.command === 'send') {
-                this.view?.webview.postMessage({ command: 'message', role: "user", value: data.value });
-                const [response, replacement] = await modify(data.value);
-                this.view?.webview.postMessage({ command: 'message', role: "agent", diff: response, replacement: replacement });
-            } else if (data.command === "approve") {
-                let activeEditor = vscode.window.activeTextEditor;
-                if (activeEditor) {
-                    let [selectedRange, _] = getSelectedText(activeEditor);
-                    activeEditor.edit(editBuilder => {
-                        editBuilder.replace(selectedRange, data.value);
-                    });
-                }
-            }
-        });
+        view.webview.onDidReceiveMessage(this.handleMessage);
     }
 
     getHtmlForWebview(webview: vscode.Webview): string {
@@ -232,11 +248,7 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
                     <link href="${codiconsUri}" rel="stylesheet">
                 </head>
                 <body>
-                    <div class="chat">
-                        <div class="chat-placeholder">
-                            Ask ChatGPT a question and the response will appear here.
-                        </div>
-                    </div>
+                    <div class="chat-output"></div>
 
                     <div class="chat-input">
                         <textarea placeholder="Ask a question!" class="chat-message"></textarea>
@@ -256,6 +268,9 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
 
 export function activate(context: vscode.ExtensionContext) {
     const chatViewProvider = new ChatViewProvider(context.extensionUri);
+
+    context.subscriptions.push(vscode.commands.registerCommand('ask-vsc.ask', chatViewProvider.ask));
+    context.subscriptions.push(vscode.commands.registerCommand('ask-vsc.modify', chatViewProvider.modify));
     context.subscriptions.push(vscode.window.registerWebviewViewProvider('ask-vsc.chat-view', chatViewProvider));
 }
 export function deactivate() {}
