@@ -103,12 +103,21 @@ function query(prompt: string): Promise<string> {
     });
 }
 
+function diff(region: string, replacement: string): Promise<string> {
+    return new Promise((resolve, reject) => {
+        fs.writeFileSync('/tmp/.region', region);
+        fs.writeFileSync('/tmp/.replacement', replacement);
+        subprocess.exec('git diff --no-index /tmp/.region /tmp/.replacement', async (error, stdout, stderr) => {
+            resolve(stdout);
+        });
+    });
+}
+
 
 // API functions
 
-async function ask () {
+async function ask(question: string): Promise<string> {
     const activeEditor = vscode.window.activeTextEditor;
-    const question = await vscode.window.showInputBox({ prompt: 'Enter your question' });
     if (question && activeEditor) {
         const [_, selectedText] = getSelectedText(activeEditor);
         const prompt = createPrompt([
@@ -118,24 +127,14 @@ async function ask () {
             { type: "code",   value: selectedText },
             { type: "prompt", value: question }
         ]);
-        const response = await query(prompt);
-        if (response.length > 60) {
-            const uri = vscode.Uri.parse('answer:Answer?' + encodeURIComponent(response));
-            const doc = await vscode.workspace.openTextDocument(uri);
-            vscode.window.showTextDocument(doc, {
-                preview: false,
-                preserveFocus: true,
-                viewColumn: vscode.ViewColumn.Beside
-            });
-        } else {
-            vscode.window.showInformationMessage(response);
-        }
+        return await query(prompt);
+    } else {
+        return "";
     }
 }
 
-async function modify () {
+async function modify(question: string): Promise<[string, string]> {
     const activeEditor = vscode.window.activeTextEditor;
-    const question = await vscode.window.showInputBox({ prompt: 'Enter your question' });
     if (question && activeEditor) {
         const [selectedRange, selectedText] = getSelectedText(activeEditor);
         const indentationLevel = selectedText ? getIndentationLevel(selectedText) : activeEditor.selection.start.character;
@@ -157,57 +156,121 @@ async function modify () {
         const prompt = createPrompt([...commonMessages, ...actionMessages]);
         const response = await query(prompt);
         const replacement = applyIndentationLevel(removeTrailingNewlines(removeBackticks(response)), indentationLevel);
-        fs.writeFileSync('/tmp/.region', selectedText || "");
-        fs.writeFileSync('/tmp/.replacement', replacement);
-        subprocess.exec('git diff --no-index /tmp/.region /tmp/.replacement', async (error, stdout, stderr) => {
-            const uri = vscode.Uri.parse('answer:Diff?' + encodeURIComponent(stdout));
-            const doc = await vscode.workspace.openTextDocument(uri);
-            vscode.languages.setTextDocumentLanguage(doc, "diff");
-            vscode.window.showTextDocument(doc, {
-                preview: false,
-                preserveFocus: true,
-                viewColumn: vscode.ViewColumn.Beside
-            });
-        });
-
-        const selectedOption = await vscode.window.showInformationMessage(
-            'Do you want to apply the changes?',
-            'Approve', 'Reject'
-        );
-
-        if (selectedOption === 'Approve') {
-            activeEditor?.edit(editBuilder => {
-                editBuilder.replace(selectedRange, replacement);
-            });
-        }
-
-        const tabs = vscode.window.tabGroups.all.map(tg => tg.tabs).flat();
-        for (let tab of tabs) {
-            if (tab.input instanceof vscode.TabInputText && tab.input.uri.path === "Diff") {
-                await vscode.window.tabGroups.close(tab);
-            }
-        }
+        const diffed = await diff(selectedText || "", replacement);
+        return [diffed, replacement];
+    } else {
+        return ["", ""];
     }
 }
 
 
-// Answer mode
+// Ask sidebar
 
-const answerProvider = new class implements vscode.TextDocumentContentProvider {
-    onDidChangeEmitter = new vscode.EventEmitter<vscode.Uri>();
-    onDidChange = this.onDidChangeEmitter.event;
-
-    provideTextDocumentContent(uri: vscode.Uri): vscode.ProviderResult<string> {
-        return uri.query;
+function getNonce() {
+    let text = '';
+    const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+    for (let i = 0; i < 32; i++) {
+        text += possible.charAt(Math.floor(Math.random() * possible.length));
     }
-};
+    return text;
+}
+
+class ChatViewProvider implements vscode.WebviewViewProvider {
+    private view?: vscode.WebviewView;
+
+    constructor(private extensionUri: vscode.Uri) { }
+
+    ask = () => {
+        this.view?.webview.postMessage({ command: 'focus', value: '/ask ' });
+    };
+    modify = () => {
+        this.view?.webview.postMessage({ command: 'focus', value: '' });
+    };
+
+    handleMessage = async (data: any) => {
+        if (data.command === 'send') {
+            this.view?.webview.postMessage({ command: 'clear' });
+            if (data.value.startsWith('/ask ')) {
+                const message = data.value.slice(5);
+                this.view?.webview.postMessage({ command: 'message', role: "user", value: message });
+                const response = await ask(message);
+                this.view?.webview.postMessage({ command: 'message', role: "agent", value: response });
+            } else {
+                this.view?.webview.postMessage({ command: 'message', role: "user", value: data.value });
+                const [response, replacement] = await modify(data.value);
+                this.view?.webview.postMessage({ command: 'message', role: "agent", diff: response, replacement: replacement });
+            }
+        } else if (data.command === "approve") {
+            this.view?.webview.postMessage({ command: 'clear' });
+            let activeEditor = vscode.window.activeTextEditor;
+            if (activeEditor) {
+                let [selectedRange, _] = getSelectedText(activeEditor);
+                activeEditor.edit(editBuilder => {
+                    editBuilder.replace(selectedRange, data.value);
+                });
+                vscode.window.showTextDocument(activeEditor.document, activeEditor.viewColumn);
+            }
+        }
+    };
+
+    resolveWebviewView(
+        view: vscode.WebviewView,
+        context: vscode.WebviewViewResolveContext,
+        token: vscode.CancellationToken,
+    ) {
+        this.view = view;
+        view.webview.options = {
+            enableScripts: true,
+            localResourceRoots: [this.extensionUri]
+        };
+        view.webview.html = this.getHtmlForWebview(view.webview);
+        view.webview.onDidReceiveMessage(this.handleMessage);
+    }
+
+    getHtmlForWebview(webview: vscode.Webview): string {
+        // Get the local path to main script run in the webview, then convert it to a uri we can use in the webview.
+        const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'media', 'main.js'));
+        const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'media', 'main.css'));
+        const codiconsUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'node_modules', '@vscode/codicons', 'dist', 'codicon.css'));
+
+        // Use a nonce to only allow a specific script to be run.
+        const nonce = getNonce();
+
+        return `
+            <!DOCTYPE html>
+                <html lang="en">
+                <head>
+                    <meta charset="UTF-8">
+                    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; font-src ${webview.cspSource}; style-src ${webview.cspSource}; script-src 'nonce-${nonce}';">
+                    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+                    <link href="${styleUri}" rel="stylesheet">
+                    <link href="${codiconsUri}" rel="stylesheet">
+                </head>
+                <body>
+                    <div class="chat-output"></div>
+
+                    <div class="chat-input">
+                        <textarea placeholder="Ask a question!" class="chat-message"></textarea>
+                        <div class="chat-send">
+                            <i class="codicon codicon-send"></i>
+                        </div>
+                    </div>
+
+                    <script nonce="${nonce}" src="${scriptUri}"></script>
+                </body>
+            </html>`;
+    }
+}
 
 
 // Register commands
 
 export function activate(context: vscode.ExtensionContext) {
-    context.subscriptions.push(vscode.commands.registerCommand('ask-vsc.ask', ask));
-    context.subscriptions.push(vscode.commands.registerCommand('ask-vsc.modify', modify));
-    context.subscriptions.push(vscode.workspace.registerTextDocumentContentProvider('answer', answerProvider));
+    const chatViewProvider = new ChatViewProvider(context.extensionUri);
+
+    context.subscriptions.push(vscode.commands.registerCommand('ask-vsc.ask', chatViewProvider.ask));
+    context.subscriptions.push(vscode.commands.registerCommand('ask-vsc.modify', chatViewProvider.modify));
+    context.subscriptions.push(vscode.window.registerWebviewViewProvider('ask-vsc.chat-view', chatViewProvider));
 }
 export function deactivate() {}
