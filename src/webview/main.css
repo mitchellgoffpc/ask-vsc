@@ -143,7 +143,6 @@ textarea::-webkit-scrollbar {
 }
 
 .chat-output .chat-message .chat-header {
-    padding-bottom: 10px;
     font-weight: 600;
 }
 
@@ -183,7 +182,12 @@ textarea::-webkit-scrollbar {
     background-color: transparent;
 }
 
-.chat-input .chat-send .codicon {
+.chat-input .chat-send {
+    width: 20px;
     padding-left: var(--input-padding-horizontal);
+    text-align: center;
+}
+.chat-input .chat-send .codicon {
     vertical-align: middle;
+    cursor: pointer;
 }

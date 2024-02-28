@@ -6,26 +6,66 @@ const ROLE_NAMES: any = {
     agent: "Agent",
 };
 
+type Message = {
+    command: string;
+    value: string;
+};
+
+type State = {
+    chatMessages: Message[];
+    chatHistory: string[];
+    chatHistoryOffset: number;
+    text: string;
+};
+
+function getState(): State {
+    return {
+        chatMessages: [],
+        chatHistory: [],
+        chatHistoryOffset: -1,
+        text: "",
+        ...(vscode.getState() || {}),
+    };
+}
+
+function updateState(getNextState: (state: State) => State): void {
+    vscode.setState(getNextState(getState()));
+}
+
+
+// Helper functions
+
 function autogrow(element: HTMLElement): void {
     element.style.height = "5px";
-    element.style.height = (element.scrollHeight) + "px";
+    element.style.height = `${element.scrollHeight}px`;
 }
 
-function getState(): any {
-    return vscode.getState() || {};
-}
-function updateState(getState: Function): void {
-    vscode.setState(getState(vscode.getState()));
-}
+function getCursorLine(textarea: HTMLTextAreaElement, fromEnd: boolean = false): number {
+    let bbox = textarea.getBoundingClientRect();
+    let style = {position: 'absolute', top: 0, left: 0, visibility: 'hidden', width: `${bbox.width}px`, height: '5px'};
+    let mirror = createElement('textarea', {style}, '');
+    document.body.appendChild(mirror);
 
+    let lineHeight = mirror.scrollHeight;
+    mirror.innerHTML = textarea.value.substring(0, textarea.selectionStart + 1);
+    let cursorHeight = mirror.scrollHeight;
+    mirror.innerHTML = textarea.value;
+    let fullHeight = mirror.scrollHeight;
+    let cursorLine = Math.round(cursorHeight / lineHeight) - 1;
+    let totalLines = Math.round(fullHeight / lineHeight);
 
-// Rendering
+    mirror.remove();
+    console.log(fromEnd ? cursorLine - totalLines : cursorLine);
+    return fromEnd ? cursorLine - totalLines : cursorLine;
+}
 
 function createElement(tag: string, attributes: any, children: HTMLElement[] | string): HTMLElement {
     const element = document.createElement(tag);
 
     for (let key in attributes) {
-        if (key === 'className') {
+        if (key === 'style') {
+            Object.assign(element.style, attributes[key]);
+        } else if (key === 'className') {
             element.classList.add(attributes[key]);
         } else if (key.startsWith('on') && attributes[key] instanceof Function) {
             element.addEventListener(key.substring(2).toLowerCase(), attributes[key]);
@@ -41,6 +81,9 @@ function createElement(tag: string, attributes: any, children: HTMLElement[] | s
     }
     return element;
 }
+
+
+// Rendering
 
 function renderMarkdownLine(tag: string, line: string): HTMLElement {
     const span = document.createElement(tag);
@@ -146,16 +189,17 @@ function renderMessage(message: any): HTMLElement {
             message.diff ? renderDiff(message) : [renderMarkdown(message.value)])]);
 }
 
-function updateChatOutput(chatOutput: HTMLElement): void{
-    let chatHistory = getState().chatHistory || [];
+function updateChatOutput(chatOutput: HTMLElement): void {
+    let chatMessages = getState().chatMessages || [];
     chatOutput.replaceChildren(
-        chatHistory.length
-            ? createElement('div', {className: 'chat-messages'}, chatHistory.map(renderMessage))
+        chatMessages.length
+            ? createElement('div', {className: 'chat-messages'}, chatMessages.map(renderMessage))
             : createElement('span', {className: 'chat-placeholder'}, CHAT_PLACEHOLDER));
 }
 
 function updateChatInput(chatInput: HTMLTextAreaElement): void {
-    chatInput.value = getState().text || "";
+    let {chatHistory, chatHistoryOffset, text} = getState();
+    chatInput.value = chatHistoryOffset >= 0 ? chatHistory[chatHistoryOffset] : text;
     chatInput.focus();
     autogrow(chatInput);
 }
@@ -175,13 +219,16 @@ document.addEventListener('DOMContentLoaded', function() {
     function submit() {
         if (chatInput && chatInput.value) {
             vscode.postMessage({ command: 'send', value: chatInput.value });
-            updateState((state: any) => ({...state, text: ""}));
+            updateState(state => ({...state, text: "", chatHistoryOffset: -1, chatHistory: [chatInput.value, ...state.chatHistory]}));
             updateChatInput(chatInput);
         }
     }
 
     chatInput.addEventListener('input', () => {
-        updateState((state: any) => ({...state, text: chatInput.value}));
+        updateState(state =>
+            state.chatHistoryOffset >= 0
+                ? {...state, chatHistory: [...state.chatHistory.slice(0, state.chatHistoryOffset), chatInput.value, ...state.chatHistory.slice(state.chatHistoryOffset + 1)]}
+                : {...state, text: chatInput.value});
         autogrow(chatInput);
     });
 
@@ -189,6 +236,14 @@ document.addEventListener('DOMContentLoaded', function() {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
             submit();
+        } if (e.key === 'PageUp' || (e.key === 'ArrowUp' && getCursorLine(chatInput) === 0)) {
+            e.preventDefault();
+            updateState(state => ({...state, chatHistoryOffset: Math.min(state.chatHistoryOffset + 1, state.chatHistory.length - 1)}));
+            updateChatInput(chatInput);
+        } else if (e.key === 'PageDown' || (e.key === 'ArrowDown' && getCursorLine(chatInput, true) === -1)) {
+            e.preventDefault();
+            updateState(state => ({...state, chatHistoryOffset: Math.max(state.chatHistoryOffset - 1, -1)}));
+            updateChatInput(chatInput);
         }
     });
 
@@ -197,13 +252,13 @@ document.addEventListener('DOMContentLoaded', function() {
     window.addEventListener('message', event => {
         const message = event.data;
         if (message.command === 'clear') {
-            updateState((state: any) => ({...state, chatHistory: []}));
+            updateState(state => ({...state, chatMessages: []}));
             updateChatOutput(chatOutput);
         } else if (message.command === 'message') {
-            updateState((state: any) => ({...state, chatHistory: [...state.chatHistory, message]}));
+            updateState(state => ({...state, chatMessages: [...state.chatMessages, message]}));
             updateChatOutput(chatOutput);
         } else if (message.command === 'focus') {
-            updateState((state: any) => ({...state, text: message.value}));
+            updateState(state => ({...state, text: message.value}));
             updateChatInput(chatInput);
         }
     });

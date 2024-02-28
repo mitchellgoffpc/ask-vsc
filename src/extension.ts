@@ -181,9 +181,11 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
     constructor(private extensionUri: vscode.Uri) { }
 
     ask = () => {
+        this.view?.show();
         this.view?.webview.postMessage({ command: 'focus', value: '/ask ' });
     };
     modify = () => {
+        this.view?.show();
         this.view?.webview.postMessage({ command: 'focus', value: '' });
     };
 
