@@ -2,6 +2,8 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as subprocess from 'child_process';
 import * as Diff from 'diff';
+import { query } from './api/query';
+import { MODELS } from './api/models';
 
 const SYSTEM_PROMPT =
   "You are CodeGPT, a world-class AI designed to help write and debug code. " +
@@ -86,18 +88,18 @@ function createPrompt(messages: Message[]): string {
     return filteredMessages.join("\n\n");
 }
 
-function query(prompt: string): Promise<string> {
-    return new Promise((resolve, reject) => {
-        fs.writeFileSync('/tmp/.message', prompt);
-        subprocess.exec('cat /tmp/.message | ask', (error, stdout, stderr) => {
-            if (error) {
-                reject(error);
-            } else {
-                resolve(stdout);
-            }
-        });
-    });
-}
+// function query(prompt: string): Promise<string> {
+//     return new Promise((resolve, reject) => {
+//         fs.writeFileSync('/tmp/.message', prompt);
+//         subprocess.exec('cat /tmp/.message | ask', (error, stdout, stderr) => {
+//             if (error) {
+//                 reject(error);
+//             } else {
+//                 resolve(stdout);
+//             }
+//         });
+//     });
+// }
 
 
 // API functions
@@ -113,7 +115,7 @@ async function ask(question: string): Promise<string> {
             { type: "code",   value: selectedText },
             { type: "prompt", value: question }
         ]);
-        return await query(prompt);
+        return await query(prompt, MODELS[0]);
     } else {
         return "";
     }
@@ -140,7 +142,7 @@ async function modify(question: string): Promise<Diff.Change[]> {
         ];
 
         const prompt = createPrompt([...commonMessages, ...actionMessages]);
-        const response = await query(prompt);
+        const response = await query(prompt, MODELS[0]);
         const replacement = applyIndentationLevel(removeTrailingNewlines(removeBackticks(response)), indentationLevel);
         return Diff.diffLines(selectedText || "", replacement);
     } else {
