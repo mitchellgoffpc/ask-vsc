@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as subprocess from 'child_process';
+import * as Diff from 'diff';
 
 const SYSTEM_PROMPT =
   "You are CodeGPT, a world-class AI designed to help write and debug code. " +
@@ -74,15 +75,10 @@ function applyIndentationLevel(text: string, indentationLevel: number): string {
 }
 
 function formatMessage(message: Message): string | null {
-    if (message.value === null) {
-       return null;
-    } else if (message.type === "prompt") {
-        return message.value;
-    } else if (message.type === "code") {
-        return `\`\`\`\n${message.value}\n\`\`\``;
-    } else {
-        throw Error("Unexpected message type");
-    }
+    return message.value === null    ? null :
+           message.type === "prompt" ? message.value :
+           message.type === "code"   ? "```\n" + message.value + "\n```" :
+                                       null;
 }
 
 function createPrompt(messages: Message[]): string {
@@ -99,16 +95,6 @@ function query(prompt: string): Promise<string> {
             } else {
                 resolve(stdout);
             }
-        });
-    });
-}
-
-function diff(region: string, replacement: string): Promise<string> {
-    return new Promise((resolve, reject) => {
-        fs.writeFileSync('/tmp/.region', region);
-        fs.writeFileSync('/tmp/.replacement', replacement);
-        subprocess.exec('git diff --no-index /tmp/.region /tmp/.replacement', async (error, stdout, stderr) => {
-            resolve(stdout);
         });
     });
 }
@@ -133,7 +119,7 @@ async function ask(question: string): Promise<string> {
     }
 }
 
-async function modify(question: string): Promise<[string, string]> {
+async function modify(question: string): Promise<Diff.Change[]> {
     const activeEditor = vscode.window.activeTextEditor;
     if (question && activeEditor) {
         const [selectedRange, selectedText] = getSelectedText(activeEditor);
@@ -156,10 +142,9 @@ async function modify(question: string): Promise<[string, string]> {
         const prompt = createPrompt([...commonMessages, ...actionMessages]);
         const response = await query(prompt);
         const replacement = applyIndentationLevel(removeTrailingNewlines(removeBackticks(response)), indentationLevel);
-        const diffed = await diff(selectedText || "", replacement);
-        return [diffed, replacement];
+        return Diff.diffLines(selectedText || "", replacement);
     } else {
-        return ["", ""];
+        return [];
     }
 }
 
@@ -199,16 +184,20 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
                 this.view?.webview.postMessage({ command: 'message', role: "agent", value: response });
             } else {
                 this.view?.webview.postMessage({ command: 'message', role: "user", value: data.value });
-                const [response, replacement] = await modify(data.value);
-                this.view?.webview.postMessage({ command: 'message', role: "agent", diff: response, replacement: replacement });
+                const diff = await modify(data.value);
+                this.view?.webview.postMessage({ command: 'message', role: "agent", diff: diff });
             }
         } else if (data.command === "approve") {
             this.view?.webview.postMessage({ command: 'clear' });
             let activeEditor = vscode.window.activeTextEditor;
             if (activeEditor) {
                 let [selectedRange, _] = getSelectedText(activeEditor);
+                let replacement = data.diff
+                    .filter((change: Diff.Change) => !change.removed)
+                    .map((change: Diff.Change) => change.value)
+                    .join('');
                 activeEditor.edit(editBuilder => {
-                    editBuilder.replace(selectedRange, data.value);
+                    editBuilder.replace(selectedRange, replacement);
                 });
                 vscode.window.showTextDocument(activeEditor.document, activeEditor.viewColumn);
             }

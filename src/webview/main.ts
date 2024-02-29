@@ -160,24 +160,32 @@ function renderMarkdown(input: string): HTMLElement {
     return div;
 }
 
-function getDiffLineClass(line: string): string | null {
-    if (line.match(/^\+(?!\+)/)) {
-        return 'add';
-    } else if (line.match(/^\-(?!\-)/)) {
-        return 'remove';
-    } else {
-        return null;
-    }
+function getDiffChangeClass(change: Diff.Change): string | null {
+    return change.added   ? 'add' :
+           change.removed ? 'remove' :
+                            null;
+}
+
+function formatDiffLine(line: string, change: Diff.Change): string {
+    return change.added   ? `+${line}` :
+           change.removed ? `-${line}` :
+                            ` ${line}`;
+}
+
+function formatDiffChange(change: Diff.Change): string {
+    let lines = change.value.replace(/\n$/, '').split('\n');
+    let formattedLines = lines.map(line => formatDiffLine(line, change));
+    return formattedLines.join('\n') + '\n';
 }
 
 function renderDiff(message: any): HTMLElement[] {
     return [
         createElement('div', {className: 'chat-code'}, [
-            createElement('code', {lang: 'diff'}, message.diff.split('\n').map((line: string) =>
-                createElement('span', {className: getDiffLineClass(line)}, line)))
+            createElement('pre', {lang: 'diff'}, message.diff.map((change: Diff.Change) =>
+                createElement('span', {className: getDiffChangeClass(change)}, formatDiffChange(change))))
         ]),
         createElement('button', {className: 'chat-approve', onClick: () => {
-            vscode.postMessage({ command: 'approve', value: message.replacement });
+            vscode.postMessage({ command: 'approve', diff: message.diff });
         }}, "Approve")
     ];
 }
