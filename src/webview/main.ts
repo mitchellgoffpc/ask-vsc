@@ -269,7 +269,8 @@ document.addEventListener('DOMContentLoaded', function() {
             updateState(state => ({...state, chatMessages: [...state.chatMessages.slice(0, -1), message]}));
             let lastMessage = chatOutput.querySelector('.chat-messages > .chat-message:last-child');
             let body = lastMessage?.querySelector('.chat-body');
-            body?.replaceChildren(renderMarkdown(message.value));
+            let newBody = message.diff ? renderDiff(message) : [renderMarkdown(message.value)];
+            body?.replaceChildren(...newBody);
         } else if (message.command === 'focus') {
             updateState(state => ({...state, text: message.value}));
             updateChatInput(chatInput);

@@ -22,17 +22,55 @@ type Message = {
 
 // Helper functions
 
-function removeTrailingNewlines(input: string): string {
-    return input.replace(/\n+$/, '');
+async function* accumulate(iterable: AsyncIterable<string>): AsyncIterable<string> {
+    let result = "";
+    for await (let value of iterable) {
+        result += value;
+        yield result;
+    }
 }
 
-function removeBackticks(input: string): string {
-    const startIndex = input.indexOf("```");
-    const lastIndex = input.lastIndexOf("```");
-    if (startIndex !== -1 && lastIndex !== startIndex) {
-        return input.slice(input.indexOf('\n', startIndex) + 1, lastIndex);
+async function* lines(iterable: AsyncIterable<string>): AsyncIterable<string> {
+    let currentLine = "";
+    for await (let value of iterable) {
+        currentLine += value;
+        if (value.endsWith('\n')) {
+            yield currentLine;
+            currentLine = "";
+        }
+    }
+    if (currentLine) {
+        yield currentLine;
+    }
+}
+
+async function* removeBackticks(iterable: AsyncIterable<string>): AsyncIterable<string> {
+    let inBackticks = false;
+    for await (let value of iterable) {
+        if (!inBackticks && value.startsWith('```')) {
+            inBackticks = true;
+        } else if (inBackticks && value.startsWith('```')) {
+            break;
+        } else if (inBackticks) {
+            yield value;
+        }
+    }
+}
+
+function getIndentationLevel(text: string): number {
+    const lines = text.split('\n');
+    const indentations = lines.map(line => line.search(/\S/))
+                              .filter(indent => indent !== -1);
+    return indentations.length ? Math.min(...indentations) : 0;
+}
+
+function applyIndentationLevel(text: string, indentationLevel: number): string {
+    const currentIndentationLevel = getIndentationLevel(text);
+    if (currentIndentationLevel >= indentationLevel) {
+        return text;
     } else {
-        return input;
+        const indentation = " ".repeat(indentationLevel - currentIndentationLevel);
+        return text.split('\n').map(line => indentation + line).join('\n');
     }
 }
 
@@ -54,23 +92,6 @@ function getSelectedText(editor: vscode.TextEditor): [vscode.Range, string | nul
         const endLine = editor.document.lineAt(editor.selection.end.line);
         const selectionRange = new vscode.Range(startLine.range.start, endLine.range.end);
         return [selectionRange, editor.document.getText(selectionRange)];
-    }
-}
-
-function getIndentationLevel(text: string): number {
-    const lines = text.split('\n');
-    const indentations = lines.map(line => line.search(/\S/))
-                              .filter(indent => indent !== -1);
-    return indentations.length ? Math.min(...indentations) : 0;
-}
-
-function applyIndentationLevel(text: string, indentationLevel: number): string {
-    const currentIndentationLevel = getIndentationLevel(text);
-    if (currentIndentationLevel >= indentationLevel) {
-        return text;
-    } else {
-        const indentation = " ".repeat(indentationLevel - currentIndentationLevel);
-        return text.split('\n').map(line => indentation + line).join('\n');
     }
 }
 
@@ -100,13 +121,13 @@ async function* ask(question: string): AsyncIterable<string> {
             { type: "code",   value: selectedText },
             { type: "prompt", value: question }
         ]);
-        yield* query(prompt, MODELS[0]);
+        yield* accumulate(query(prompt, MODELS[0]));
     } else {
         yield "";
     }
 }
 
-async function modify(question: string): Promise<Diff.Change[]> {
+async function* modify(question: string): AsyncIterable<Diff.Change[]> {
     const activeEditor = vscode.window.activeTextEditor;
     if (question && activeEditor) {
         const [selectedRange, selectedText] = getSelectedText(activeEditor);
@@ -128,14 +149,19 @@ async function modify(question: string): Promise<Diff.Change[]> {
 
         const prompt = createPrompt([...commonMessages, ...actionMessages]);
 
-        let response = '';
-        for await (let token of query(prompt, MODELS[0])) {
-            response += token;
+        let finalDiff: Diff.Change[] = [];
+        for await (let update of accumulate(removeBackticks(lines(query(prompt, MODELS[0]))))) {
+            let diff = Diff.diffLines((selectedText || "") + "\n", update);
+            console.log(diff.map(change => (change.added ? "+" : change.removed ? "-" : " ") + change.value));
+            finalDiff = diff.slice();
+            while (diff.length && diff[diff.length - 1].removed) {
+                diff.pop();  // Don't show trailing removed lines until the end
+            }
+            yield diff;
         }
-        const replacement = applyIndentationLevel(removeTrailingNewlines(removeBackticks(response)), indentationLevel);
-        return Diff.diffLines(selectedText || "", replacement);
+        yield finalDiff;
     } else {
-        return [];
+        yield [];
     }
 }
 
@@ -158,29 +184,28 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
 
     ask = () => {
         this.view?.show();
-        this.view?.webview.postMessage({ command: 'focus', value: '/ask ' });
+        this.view?.webview.postMessage({ command: 'focus', value: '' });
     };
     modify = () => {
         this.view?.show();
-        this.view?.webview.postMessage({ command: 'focus', value: '' });
+        this.view?.webview.postMessage({ command: 'focus', value: '/mod ' });
     };
 
     handleMessage = async (data: any) => {
         if (data.command === 'send') {
             this.view?.webview.postMessage({ command: 'clear' });
-            if (data.value.startsWith('/ask ')) {
-                const message = data.value.slice(5);
-                this.view?.webview.postMessage({ command: 'message', role: "user", value: message });
+            if (data.value.startsWith('/mod ')) {
+                this.view?.webview.postMessage({ command: 'message', role: "user", value: data.value.slice(5) });
                 this.view?.webview.postMessage({ command: 'message', role: "agent", value: "" });
-                let update = '';
-                for await (let token of ask(message)) {
-                    update = update + token;
-                    this.view?.webview.postMessage({ command: 'message-update', role: "agent", value: update });
+                for await (let update of modify(data.value.slice(5))) {
+                    this.view?.webview.postMessage({ command: 'message-update', role: "agent", diff: update });
                 }
             } else {
                 this.view?.webview.postMessage({ command: 'message', role: "user", value: data.value });
-                const diff = await modify(data.value);
-                this.view?.webview.postMessage({ command: 'message', role: "agent", diff: diff });
+                this.view?.webview.postMessage({ command: 'message', role: "agent", value: "" });
+                for await (let update of ask(data.value)) {
+                    this.view?.webview.postMessage({ command: 'message-update', role: "agent", value: update });
+                }
             }
         } else if (data.command === "approve") {
             this.view?.webview.postMessage({ command: 'clear' });
