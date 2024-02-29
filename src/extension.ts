@@ -1,6 +1,4 @@
 import * as vscode from 'vscode';
-import * as fs from 'fs';
-import * as subprocess from 'child_process';
 import * as Diff from 'diff';
 import { query } from './api/query';
 import { MODELS } from './api/models';
@@ -88,36 +86,23 @@ function createPrompt(messages: Message[]): string {
     return filteredMessages.join("\n\n");
 }
 
-// function query(prompt: string): Promise<string> {
-//     return new Promise((resolve, reject) => {
-//         fs.writeFileSync('/tmp/.message', prompt);
-//         subprocess.exec('cat /tmp/.message | ask', (error, stdout, stderr) => {
-//             if (error) {
-//                 reject(error);
-//             } else {
-//                 resolve(stdout);
-//             }
-//         });
-//     });
-// }
-
 
 // API functions
 
-async function ask(question: string): Promise<string> {
+async function* ask(question: string): AsyncIterable<string> {
     const activeEditor = vscode.window.activeTextEditor;
     if (question && activeEditor) {
         const [_, selectedText] = getSelectedText(activeEditor);
         const prompt = createPrompt([
             { type: "prompt", value: CODE_PROMPT },
-            { type: "code",   value: activeEditor?.document.getText() || null },
+            { type: "code",   value: activeEditor.document.getText() || null },
             { type: "prompt", value: "Now, please answer the following question:" },
             { type: "code",   value: selectedText },
             { type: "prompt", value: question }
         ]);
-        return await query(prompt, MODELS[0]);
+        yield* query(prompt, MODELS[0]);
     } else {
-        return "";
+        yield "";
     }
 }
 
@@ -142,7 +127,11 @@ async function modify(question: string): Promise<Diff.Change[]> {
         ];
 
         const prompt = createPrompt([...commonMessages, ...actionMessages]);
-        const response = await query(prompt, MODELS[0]);
+
+        let response = '';
+        for await (let token of query(prompt, MODELS[0])) {
+            response += token;
+        }
         const replacement = applyIndentationLevel(removeTrailingNewlines(removeBackticks(response)), indentationLevel);
         return Diff.diffLines(selectedText || "", replacement);
     } else {
@@ -182,8 +171,12 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
             if (data.value.startsWith('/ask ')) {
                 const message = data.value.slice(5);
                 this.view?.webview.postMessage({ command: 'message', role: "user", value: message });
-                const response = await ask(message);
-                this.view?.webview.postMessage({ command: 'message', role: "agent", value: response });
+                this.view?.webview.postMessage({ command: 'message', role: "agent", value: "" });
+                let update = '';
+                for await (let token of ask(message)) {
+                    update = update + token;
+                    this.view?.webview.postMessage({ command: 'message-update', role: "agent", value: update });
+                }
             } else {
                 this.view?.webview.postMessage({ command: 'message', role: "user", value: data.value });
                 const diff = await modify(data.value);

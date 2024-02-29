@@ -7,7 +7,7 @@ const ROLE_NAMES: any = {
 };
 
 type Message = {
-    command: string;
+    role: string;
     value: string;
 };
 
@@ -55,7 +55,6 @@ function getCursorLine(textarea: HTMLTextAreaElement, fromEnd: boolean = false):
     let totalLines = Math.round(fullHeight / lineHeight);
 
     mirror.remove();
-    console.log(fromEnd ? cursorLine - totalLines : cursorLine);
     return fromEnd ? cursorLine - totalLines : cursorLine;
 }
 
@@ -221,6 +220,7 @@ document.addEventListener('DOMContentLoaded', function() {
     let chatSubmit = document.querySelector('.chat-input .chat-send') as HTMLElement;
     if (!chatOutput || !chatInput || !chatSubmit) { return; }
 
+    // updateState(_ => ({}));
     updateChatOutput(chatOutput);
     updateChatInput(chatInput);
 
@@ -265,6 +265,11 @@ document.addEventListener('DOMContentLoaded', function() {
         } else if (message.command === 'message') {
             updateState(state => ({...state, chatMessages: [...state.chatMessages, message]}));
             updateChatOutput(chatOutput);
+        } else if (message.command === 'message-update') {
+            updateState(state => ({...state, chatMessages: [...state.chatMessages.slice(0, -1), message]}));
+            let lastMessage = chatOutput.querySelector('.chat-messages > .chat-message:last-child');
+            let body = lastMessage?.querySelector('.chat-body');
+            body?.replaceChildren(renderMarkdown(message.value));
         } else if (message.command === 'focus') {
             updateState(state => ({...state, text: message.value}));
             updateChatInput(chatInput);
