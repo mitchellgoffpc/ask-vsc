@@ -152,15 +152,13 @@ textarea::-webkit-scrollbar {
     overflow-y: hidden;
 }
 
-.chat-output .chat-message .chat-code code span {
-    display: block;
-    white-space: nowrap;
+.chat-output .chat-message .chat-code pre span {
     color: var(--vscode-editor-foreground);
 }
-.chat-output .chat-message .chat-code code span.add {
+.chat-output .chat-message .chat-code pre span.add {
     color: #98c379;
 }
-.chat-output .chat-message .chat-code code span.remove {
+.chat-output .chat-message .chat-code pre span.remove {
     color: #e06c75;
 }
 
