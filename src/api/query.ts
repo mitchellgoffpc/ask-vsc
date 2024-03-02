@@ -17,7 +17,7 @@ export async function* query(prompt: string | Message[], model: Model): AsyncIte
     const apiKey = process.env[api.key];
     const headers = { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" };
     const params = {
-        model: model.name,
+        model: model.id,
         messages: prompt,
         temperature: 0.7,
         stream: true,

@@ -216,7 +216,7 @@ textarea::-webkit-scrollbar {
 .chat-input .chat-settings .chat-model-options > div {
     padding: 0 var(--input-padding-horizontal);
     color: var(--vscode-editor-foreground);
-    text-align: right;
+    /* text-align: right; */
     cursor: pointer;
 }
 .chat-input .chat-settings .chat-model-options > div:hover {

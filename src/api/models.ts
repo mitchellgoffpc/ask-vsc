@@ -6,6 +6,7 @@ export interface API {
 export interface Model {
     name: string;
     api: string;
+    alias: string;
 }
 
 export const APIS: { [key: string]: API } = {
@@ -14,8 +15,10 @@ export const APIS: { [key: string]: API } = {
 };
 
 export const MODELS: Model[] = [
-    { name: 'gpt-3.5-turbo', api: 'openai' },
-    { name: 'gpt-4', api: 'openai' },
-    { name: 'gpt-4-turbo-preview', api: 'openai' },
-    { name: 'mistral-medium', api: 'mistral' },
+    { id: 'gpt-3.5-turbo', api: 'openai', name: 'GPT 3.5 Turbo' },
+    { id: 'gpt-4', api: 'openai', name: "GPT 4" },
+    { id: 'gpt-4-turbo-preview', api: 'openai', name: "GPT 4 Turbo" },
+    { id: 'open-mixtral-8x7b', api: 'mistral', name: "Mixtral" },
+    { id: 'mistral-medium-latest', api: 'mistral', name: "Mistral Medium" },
+    { id: 'mistral-large-latest', api: 'mistral', name: "Mistral Large" },
 ];
