@@ -218,9 +218,10 @@ document.addEventListener('DOMContentLoaded', function() {
     let chatOutput = document.querySelector('.chat-output') as HTMLElement;
     let chatInput = document.querySelector('.chat-input textarea') as HTMLTextAreaElement;
     let chatSubmit = document.querySelector('.chat-input .chat-send') as HTMLElement;
-    if (!chatOutput || !chatInput || !chatSubmit) { return; }
+    let chatModelSelect = document.querySelector('.chat-input .chat-model-select') as HTMLElement;
+    let chatModelName = document.querySelector('.chat-input .chat-model-name') as HTMLElement;
+    if (!chatOutput || !chatInput || !chatSubmit || !chatModelSelect) { return; }
 
-    // updateState(_ => ({}));
     updateChatOutput(chatOutput);
     updateChatInput(chatInput);
 
@@ -257,6 +258,15 @@ document.addEventListener('DOMContentLoaded', function() {
 
     chatSubmit.addEventListener('click', submit);
 
+    chatModelSelect.addEventListener('click', e => {
+        chatModelSelect.classList.toggle('open');
+        if (e.target instanceof HTMLElement && e.target.hasAttribute('data-value')) {
+            let model = e.target.getAttribute('data-value');
+            vscode.postMessage({ command: 'model', value: model });
+            chatModelName.textContent = model;
+        }
+    });
+
     window.addEventListener('message', event => {
         const message = event.data;
         if (message.command === 'clear') {
@@ -274,6 +284,12 @@ document.addEventListener('DOMContentLoaded', function() {
         } else if (message.command === 'focus') {
             updateState(state => ({...state, text: message.value}));
             updateChatInput(chatInput);
+        } else if (message.command === 'state') {
+            updateState(state => ({...state, messages: message.value.messages}));
+            updateChatOutput(chatOutput);
+            chatModelName.textContent = message.value.model.name;
         }
     });
+
+    vscode.postMessage({ command: 'getstate' });
 });

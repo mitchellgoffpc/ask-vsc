@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as Diff from 'diff';
 import { query } from './api/query';
-import { MODELS } from './api/models';
+import { MODELS, Model } from './api/models';
 
 const SYSTEM_PROMPT =
   "You are CodeGPT, a world-class AI designed to help write and debug code. " +
@@ -110,7 +110,7 @@ function createPrompt(messages: Message[]): string {
 
 // API functions
 
-async function* ask(question: string): AsyncIterable<string> {
+async function* ask(question: string, model: Model): AsyncIterable<string> {
     const activeEditor = vscode.window.activeTextEditor;
     if (question && activeEditor) {
         const [_, selectedText] = getSelectedText(activeEditor);
@@ -121,13 +121,13 @@ async function* ask(question: string): AsyncIterable<string> {
             { type: "code",   value: selectedText },
             { type: "prompt", value: question }
         ]);
-        yield* accumulate(query(prompt, MODELS[0]));
+        yield* accumulate(query(prompt, model));
     } else {
         yield "";
     }
 }
 
-async function* modify(question: string): AsyncIterable<Diff.Change[]> {
+async function* modify(question: string, model: Model): AsyncIterable<Diff.Change[]> {
     const activeEditor = vscode.window.activeTextEditor;
     if (question && activeEditor) {
         const [selectedRange, selectedText] = getSelectedText(activeEditor);
@@ -150,7 +150,7 @@ async function* modify(question: string): AsyncIterable<Diff.Change[]> {
         const prompt = createPrompt([...commonMessages, ...actionMessages]);
 
         let finalDiff: Diff.Change[] = [];
-        for await (let update of accumulate(removeBackticks(lines(query(prompt, MODELS[0]))))) {
+        for await (let update of accumulate(removeBackticks(lines(query(prompt, model))))) {
             let diff = Diff.diffLines((selectedText || "") + "\n", update);
             console.log(diff.map(change => (change.added ? "+" : change.removed ? "-" : " ") + change.value));
             finalDiff = diff.slice();
@@ -178,6 +178,8 @@ function getNonce() {
 }
 
 class ChatViewProvider implements vscode.WebviewViewProvider {
+    private model: Model = MODELS[0];
+    private messages: any[] = [];
     private view?: vscode.WebviewView;
 
     constructor(private extensionUri: vscode.Uri) { }
@@ -197,13 +199,13 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
             if (data.value.startsWith('/mod ')) {
                 this.view?.webview.postMessage({ command: 'message', role: "user", value: data.value.slice(5) });
                 this.view?.webview.postMessage({ command: 'message', role: "agent", value: "" });
-                for await (let update of modify(data.value.slice(5))) {
+                for await (let update of modify(data.value.slice(5), this.model)) {
                     this.view?.webview.postMessage({ command: 'message-update', role: "agent", diff: update });
                 }
             } else {
                 this.view?.webview.postMessage({ command: 'message', role: "user", value: data.value });
                 this.view?.webview.postMessage({ command: 'message', role: "agent", value: "" });
-                for await (let update of ask(data.value)) {
+                for await (let update of ask(data.value, this.model)) {
                     this.view?.webview.postMessage({ command: 'message-update', role: "agent", value: update });
                 }
             }
@@ -221,6 +223,10 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
                 });
                 vscode.window.showTextDocument(activeEditor.document, activeEditor.viewColumn);
             }
+        } else if (data.command === "model") {
+            this.model = MODELS.find(model => model.name === data.value) || MODELS[0];
+        } else if (data.command === "getstate") {
+            this.view?.webview.postMessage({ command: 'state', value: {model: this.model, messages: this.messages}});
         }
     };
 
@@ -262,9 +268,20 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
                     <div class="chat-output"></div>
 
                     <div class="chat-input">
-                        <textarea placeholder="Ask a question!" class="chat-message"></textarea>
-                        <div class="chat-send">
-                            <i class="codicon codicon-send"></i>
+                        <div class="chat-settings">
+                            <div class="chat-model-select">
+                                <span class="chat-model-name"></span>
+                                <i class="codicon codicon-chevron-up"></i>
+                                <div class="chat-model-options">
+                                    ${MODELS.map(model =>`<div data-value="${model.name}">${model.name}</div>`).join('')}
+                                </div>
+                            </div>
+                        </div>
+                        <div class="chat-input-box">
+                            <textarea placeholder="Ask a question!" class="chat-message"></textarea>
+                            <div class="chat-send">
+                                <i class="codicon codicon-send"></i>
+                            </div>
                         </div>
                     </div>
 

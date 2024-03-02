@@ -165,14 +165,62 @@ textarea::-webkit-scrollbar {
 /* Chat input */
 
 .chat-input {
+    margin: 0 var(--container-padding-horizontal);
+}
+
+.chat-input .chat-input-box {
     display: flex;
     flex-direction: row;
     align-items: center;
     justify-content: space-between;
     padding: var(--input-padding-vertical) var(--input-padding-horizontal);
-    margin: 0 var(--container-padding-horizontal);
     background-color: var(--vscode-input-background);
     border-radius: 3px;
+}
+
+.chat-input .chat-settings {
+    display: flex;
+    flex-direction: row;
+    justify-content: flex-end;
+}
+
+.chat-input .chat-settings .chat-model-select {
+    position: relative;
+    cursor: pointer;
+    font-size: 0.9em;
+    line-height: 2em;
+    user-select: none;
+}
+
+.chat-input .chat-settings .chat-model-select > .codicon,
+.chat-input .chat-settings .chat-model-select > .chat-model-name {
+    vertical-align: middle;
+    color: var(--vscode-editor-foreground);
+}
+
+.chat-input .chat-settings .chat-model-options {
+    display: none;
+    position: absolute;
+    bottom: 100%;
+    right: 0;
+    background-color: var(--vscode-input-background);
+    border: 1px solid var(--vscode-input-border);
+    border-radius: 3px;
+    overflow: hidden;
+    white-space: nowrap;
+}
+.chat-input .chat-settings .chat-model-select.open .chat-model-options {
+    display: block;
+}
+
+.chat-input .chat-settings .chat-model-options > div {
+    padding: 0 var(--input-padding-horizontal);
+    color: var(--vscode-editor-foreground);
+    text-align: right;
+    cursor: pointer;
+}
+.chat-input .chat-settings .chat-model-options > div:hover {
+    background-color: var(--vscode-button-hoverBackground);
 }
 
 .chat-input textarea {
