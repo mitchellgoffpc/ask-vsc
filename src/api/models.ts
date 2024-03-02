@@ -4,9 +4,9 @@ export interface API {
 }
 
 export interface Model {
-    name: string;
+    id: string;
     api: string;
-    alias: string;
+    name: string;
 }
 
 export const APIS: { [key: string]: API } = {
