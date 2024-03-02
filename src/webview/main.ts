@@ -253,6 +253,8 @@ document.addEventListener('DOMContentLoaded', function() {
             e.preventDefault();
             updateState(state => ({...state, chatHistoryOffset: Math.max(state.chatHistoryOffset - 1, -1)}));
             updateChatInput(chatInput);
+        } else if (e.key === 'g' && e.ctrlKey) {
+            vscode.postMessage({ command: 'unfocus' });
         }
     });
 

@@ -45,16 +45,23 @@ async function* lines(iterable: AsyncIterable<string>): AsyncIterable<string> {
 }
 
 async function* removeBackticks(iterable: AsyncIterable<string>): AsyncIterable<string> {
-    let inBackticks = false;
+    let inBackticks = null;
     for await (let value of iterable) {
-        if (!inBackticks && value.startsWith('```')) {
+        if (inBackticks === null && value.startsWith('```')) {  // First line
             inBackticks = true;
+        } else if (inBackticks === null) {
+            inBackticks = false;
+            yield value;
         } else if (inBackticks && value.startsWith('```')) {
             break;
-        } else if (inBackticks) {
+        } else {
             yield value;
         }
     }
+}
+
+function addTrailingNewline(text: string): string {
+    return text.endsWith('\n') ? text : text + '\n';
 }
 
 function getIndentationLevel(text: string): number {
@@ -151,8 +158,8 @@ async function* modify(question: string, model: Model): AsyncIterable<Diff.Chang
 
         let finalDiff: Diff.Change[] = [];
         for await (let update of accumulate(removeBackticks(lines(query(prompt, model))))) {
-            let diff = Diff.diffLines((selectedText || "") + "\n", update);
-            console.log(diff.map(change => (change.added ? "+" : change.removed ? "-" : " ") + change.value));
+            update = applyIndentationLevel(update, indentationLevel);
+            let diff = Diff.diffLines(addTrailingNewline(selectedText || ""), addTrailingNewline(update));
             finalDiff = diff.slice();
             while (diff.length && diff[diff.length - 1].removed) {
                 diff.pop();  // Don't show trailing removed lines until the end
@@ -227,6 +234,8 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
             this.model = MODELS.find(model => model.name === data.value) || MODELS[0];
         } else if (data.command === "getstate") {
             this.view?.webview.postMessage({ command: 'state', value: {model: this.model, messages: this.messages}});
+        } else if (data.command === "unfocus") {
+            vscode.commands.executeCommand('workbench.action.focusActiveEditorGroup');
         }
     };
 
