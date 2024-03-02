@@ -1,9 +1,11 @@
 {
   "name": "ask-vsc",
-  "displayName": "ask-vsc",
-  "description": "Query ChatGPT directly from VSCode",
+  "displayName": "Ask",
+  "description": "Ask an LLM to help you with your code",
   "version": "0.0.1",
   "repository": "https://github.com/mitchellgoffpc/ask-vsc",
+  "publisher": "ask-vsc",
+  "icon": "ask.png",
   "engines": {
     "vscode": "^1.86.0"
   },
@@ -87,7 +89,6 @@
   },
   "dependencies": {
     "@vscode/codicons": "^0.0.35",
-    "@vscode/webview-ui-toolkit": "^1.4.0",
     "diff": "^5.2.0"
   }
 }
