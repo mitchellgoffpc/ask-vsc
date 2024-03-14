@@ -183,9 +183,11 @@ function renderDiff(message: any): HTMLElement[] {
             createElement('pre', {lang: 'diff'}, message.diff.map((change: Diff.Change) =>
                 createElement('span', {className: getDiffChangeClass(change)}, formatDiffChange(change))))
         ]),
-        createElement('button', {className: 'chat-approve', onClick: () => {
-            vscode.postMessage({ command: 'approve', diff: message.diff });
-        }}, "Approve")
+        message.unfinished
+          ? createElement('div', {}, '')
+          : createElement('button', {className: 'chat-approve', onClick: () => {
+                vscode.postMessage({ command: 'approve', diff: message.diff });
+            }}, "Approve")
     ];
 }
 
@@ -200,8 +202,8 @@ function updateChatOutput(chatOutput: HTMLElement): void {
     let chatMessages = getState().chatMessages || [];
     chatOutput.replaceChildren(
         chatMessages.length
-            ? createElement('div', {className: 'chat-messages'}, chatMessages.map(renderMessage))
-            : createElement('span', {className: 'chat-placeholder'}, CHAT_PLACEHOLDER));
+          ? createElement('div', {className: 'chat-messages'}, chatMessages.map(renderMessage))
+          : createElement('span', {className: 'chat-placeholder'}, CHAT_PLACEHOLDER));
 }
 
 function updateChatInput(chatInput: HTMLTextAreaElement): void {
@@ -281,14 +283,18 @@ document.addEventListener('DOMContentLoaded', function() {
             updateState(state => ({...state, chatMessages: [...state.chatMessages.slice(0, -1), message]}));
             let lastMessage = chatOutput.querySelector('.chat-messages > .chat-message:last-child');
             let body = lastMessage?.querySelector('.chat-body');
-            let newBody = message.diff ? renderDiff(message) : [renderMarkdown(message.value)];
+            let newBody = message.diff
+              ? renderDiff({...message, unfinished: true})
+              : [renderMarkdown(message.value)];
             body?.replaceChildren(...newBody);
+        } else if (message.command === 'message-done') {
+            updateChatOutput(chatOutput);
         } else if (message.command === 'focus') {
             updateState(state => ({...state, text: message.value}));
             updateChatInput(chatInput);
         } else if (message.command === 'state') {
-            updateState(state => ({...state, messages: message.value.messages}));
-            updateChatOutput(chatOutput);
+            // updateState(state => ({...state, chatMessages: message.value.chatMessages}));
+            // updateChatOutput(chatOutput);
             chatModelName.textContent = message.value.model.name;
         }
     });

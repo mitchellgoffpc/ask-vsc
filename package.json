@@ -2,7 +2,7 @@
   "name": "ask-vsc",
   "displayName": "Ask",
   "description": "Ask an LLM to help you with your code",
-  "version": "0.0.1",
+  "version": "0.0.3",
   "repository": "https://github.com/mitchellgoffpc/ask-vsc",
   "publisher": "ask-vsc",
   "icon": "ask.png",

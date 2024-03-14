@@ -19,9 +19,9 @@ export class LineDecoder {
             this.buffer = lines.pop() || "";
         }
         for (let line of lines) {
-            assert.ok(!line || line.startsWith('data: '), `Invalid line: ${line}`);
+            assert.ok(!line || line.startsWith('data: ') || line.startsWith('event: '), `Invalid line: ${line}`);
         }
-        return lines.filter(line => line.length > 0)
+        return lines.filter(line => line.startsWith('data: '))
                     .map(line => line.substring("data: ".length))
                     .filter(line => line !== "[DONE]")
                     .map(line => JSON.parse(line));

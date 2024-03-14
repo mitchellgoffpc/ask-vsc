@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as Diff from 'diff';
-import { query } from './api/query';
 import { MODELS, Model } from './api/models';
+import { APIKeyError, APIResponseError, query } from './api/query';
 
 const SYSTEM_PROMPT =
   "You are CodeGPT, a world-class AI designed to help write and debug code. " +
@@ -34,9 +34,12 @@ async function* lines(iterable: AsyncIterable<string>): AsyncIterable<string> {
     let currentLine = "";
     for await (let value of iterable) {
         currentLine += value;
-        if (value.endsWith('\n')) {
-            yield currentLine;
-            currentLine = "";
+        if (currentLine.includes('\n')) {
+            let lines = currentLine.split('\n');
+            for (let line of lines.slice(0, -1)) {
+                yield line + '\n';
+            }
+            currentLine = lines[lines.length - 1];
         }
     }
     if (currentLine) {
@@ -117,7 +120,7 @@ function createPrompt(messages: Message[]): string {
 
 // API functions
 
-async function* ask(question: string, model: Model): AsyncIterable<string> {
+async function* ask(question: string, model: Model, controller: AbortController): AsyncIterable<string> {
     const activeEditor = vscode.window.activeTextEditor;
     if (question && activeEditor) {
         const [_, selectedText] = getSelectedText(activeEditor);
@@ -128,13 +131,13 @@ async function* ask(question: string, model: Model): AsyncIterable<string> {
             { type: "code",   value: selectedText },
             { type: "prompt", value: question }
         ]);
-        yield* accumulate(query(prompt, model));
+        yield* accumulate(query(prompt, model, controller));
     } else {
         yield "";
     }
 }
 
-async function* modify(question: string, model: Model): AsyncIterable<Diff.Change[]> {
+async function* modify(question: string, model: Model, controller: AbortController): AsyncIterable<Diff.Change[]> {
     const activeEditor = vscode.window.activeTextEditor;
     if (question && activeEditor) {
         const [selectedRange, selectedText] = getSelectedText(activeEditor);
@@ -157,7 +160,7 @@ async function* modify(question: string, model: Model): AsyncIterable<Diff.Chang
         const prompt = createPrompt([...commonMessages, ...actionMessages]);
 
         let finalDiff: Diff.Change[] = [];
-        for await (let update of accumulate(removeBackticks(lines(query(prompt, model))))) {
+        for await (let update of accumulate(removeBackticks(lines(query(prompt, model, controller))))) {
             update = applyIndentationLevel(update, indentationLevel);
             let diff = Diff.diffLines(addTrailingNewline(selectedText || ""), addTrailingNewline(update));
             finalDiff = diff.slice();
@@ -185,11 +188,10 @@ function getNonce() {
 }
 
 class ChatViewProvider implements vscode.WebviewViewProvider {
-    private model: Model = MODELS[0];
-    private messages: any[] = [];
     private view?: vscode.WebviewView;
+    private controller: AbortController = new AbortController();
 
-    constructor(private extensionUri: vscode.Uri) { }
+    constructor(private context: vscode.ExtensionContext) { }
 
     ask = () => {
         this.view?.show();
@@ -200,44 +202,78 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
         this.view?.webview.postMessage({ command: 'focus', value: '/mod ' });
     };
 
+    getModel(): Model {
+        const modelID = this.context.workspaceState.get<string>('modelID');
+        return MODELS.find(model => model.id === modelID) || MODELS[0];
+    }
+    async setModel(modelName: string) {
+        const model = MODELS.find(model => model.name === modelName) || MODELS[0];
+        await this.context.workspaceState.update('modelID', model.id);
+    }
+
+    abortRequest() {
+        this.controller.abort();
+        this.controller = new AbortController();
+    }
+
     handleMessage = async (data: any) => {
         if (data.command === 'send') {
-            this.view?.webview.postMessage({ command: 'clear' });
-            if (data.value.startsWith('/mod ')) {
-                this.view?.webview.postMessage({ command: 'message', role: "user", value: data.value.slice(5) });
-                this.view?.webview.postMessage({ command: 'message', role: "agent", value: "" });
-                for await (let update of modify(data.value.slice(5), this.model)) {
-                    this.view?.webview.postMessage({ command: 'message-update', role: "agent", diff: update });
-                }
-            } else {
-                this.view?.webview.postMessage({ command: 'message', role: "user", value: data.value });
-                this.view?.webview.postMessage({ command: 'message', role: "agent", value: "" });
-                for await (let update of ask(data.value, this.model)) {
-                    this.view?.webview.postMessage({ command: 'message-update', role: "agent", value: update });
-                }
-            }
+            await this.handleSendMessage(data.value);
         } else if (data.command === "approve") {
-            this.view?.webview.postMessage({ command: 'clear' });
-            let activeEditor = vscode.window.activeTextEditor;
-            if (activeEditor) {
-                let [selectedRange, _] = getSelectedText(activeEditor);
-                let replacement = data.diff
-                    .filter((change: Diff.Change) => !change.removed)
-                    .map((change: Diff.Change) => change.value)
-                    .join('');
-                activeEditor.edit(editBuilder => {
-                    editBuilder.replace(selectedRange, replacement);
-                });
-                vscode.window.showTextDocument(activeEditor.document, activeEditor.viewColumn);
-            }
+            await this.handleApproveDiff(data.diff);
         } else if (data.command === "model") {
-            this.model = MODELS.find(model => model.name === data.value) || MODELS[0];
+            this.setModel(data.value);
         } else if (data.command === "getstate") {
-            this.view?.webview.postMessage({ command: 'state', value: {model: this.model, messages: this.messages}});
+            this.view?.webview.postMessage({ command: 'state', value: {model: this.getModel()}});
         } else if (data.command === "unfocus") {
             vscode.commands.executeCommand('workbench.action.focusActiveEditorGroup');
         }
     };
+
+    async handleSendMessage(message: string) {
+        try {
+            this.abortRequest();
+            this.view?.webview.postMessage({ command: 'clear' });
+            if (message.startsWith('/mod ')) {
+                this.view?.webview.postMessage({ command: 'message', role: "user", value: message.slice(5) });
+                this.view?.webview.postMessage({ command: 'message', role: "agent", value: "" });
+                for await (let update of modify(message.slice(5), this.getModel(), this.controller)) {
+                    this.view?.webview.postMessage({ command: 'message-update', role: "agent", diff: update });
+                }
+            } else {
+                this.view?.webview.postMessage({ command: 'message', role: "user", value: message });
+                this.view?.webview.postMessage({ command: 'message', role: "agent", value: "" });
+                for await (let update of ask(message, this.getModel(), this.controller)) {
+                    this.view?.webview.postMessage({ command: 'message-update', role: "agent", value: update });
+                }
+            }
+            this.view?.webview.postMessage({ command: 'message-done' });
+        } catch (error: any) {
+            if (error instanceof APIKeyError) {
+                vscode.window.showErrorMessage(error.message);
+            } else if (error instanceof APIResponseError) {
+                vscode.window.showErrorMessage(error.message);  // TODO: Show the entire error message
+            } else {
+                throw error;
+            }
+        }
+    }
+
+    async handleApproveDiff(diff: Diff.Change[]) {
+        this.view?.webview.postMessage({ command: 'clear' });
+        let activeEditor = vscode.window.activeTextEditor;
+        if (activeEditor) {
+            let [selectedRange, _] = getSelectedText(activeEditor);
+            let replacement = diff
+                .filter((change: Diff.Change) => !change.removed)
+                .map((change: Diff.Change) => change.value)
+                .join('');
+            activeEditor.edit(editBuilder => {
+                editBuilder.replace(selectedRange, replacement);
+            });
+            vscode.window.showTextDocument(activeEditor.document, activeEditor.viewColumn);
+        }
+    }
 
     resolveWebviewView(
         view: vscode.WebviewView,
@@ -247,7 +283,7 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
         this.view = view;
         view.webview.options = {
             enableScripts: true,
-            localResourceRoots: [this.extensionUri]
+            localResourceRoots: [this.context.extensionUri]
         };
         view.webview.html = this.getHtmlForWebview(view.webview);
         view.webview.onDidReceiveMessage(this.handleMessage);
@@ -255,9 +291,9 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
 
     getHtmlForWebview(webview: vscode.Webview): string {
         // Get the local path to main script run in the webview, then convert it to a uri we can use in the webview.
-        const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'out', 'webview', 'main.js'));
-        const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'src', 'webview', 'main.css'));
-        const codiconsUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'node_modules', '@vscode/codicons', 'dist', 'codicon.css'));
+        const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'out', 'webview', 'main.js'));
+        const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'src', 'webview', 'main.css'));
+        const codiconsUri = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'node_modules', '@vscode/codicons', 'dist', 'codicon.css'));
 
         // Use a nonce to only allow a specific script to be run.
         const nonce = getNonce();
@@ -305,7 +341,7 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
 // Register commands
 
 export function activate(context: vscode.ExtensionContext) {
-    const chatViewProvider = new ChatViewProvider(context.extensionUri);
+    const chatViewProvider = new ChatViewProvider(context);
 
     context.subscriptions.push(vscode.commands.registerCommand('ask-vsc.ask', chatViewProvider.ask));
     context.subscriptions.push(vscode.commands.registerCommand('ask-vsc.modify', chatViewProvider.modify));
