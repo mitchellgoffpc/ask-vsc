@@ -1,3 +1,4 @@
+import * as vscode from 'vscode';
 import { Model } from "./models";
 import { LineDecoder } from "./decoder";
 import type { ReadableStream } from 'stream/web';
@@ -16,9 +17,10 @@ export async function* query(prompt: string | Message[], model: Model, controlle
     }
 
     const api = model.api;
-    const apiKey = process.env[api.key];
+    const apiKey = vscode.workspace.getConfiguration('ask').get<string>(`apiKeys.${api.key}`);
+    const apiKeyName = api.key[0].toUpperCase() + api.key.slice(1);
     if (!apiKey) {
-        throw new APIKeyError(`${api.key} environment variable isn't set!`);
+        throw new APIKeyError(`${apiKeyName} API key isn't set!`);
     }
 
     const response = await fetch(api.url, {

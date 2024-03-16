@@ -194,11 +194,11 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
     constructor(private context: vscode.ExtensionContext) { }
 
     ask = () => {
-        vscode.commands.executeCommand('ask-vsc.chat-view.focus');
+        vscode.commands.executeCommand('ask.chat-view.focus');
         this.view?.webview.postMessage({ command: 'focus', value: '' });
     };
     modify = () => {
-        vscode.commands.executeCommand('ask-vsc.chat-view.focus');
+        vscode.commands.executeCommand('ask.chat-view.focus');
         this.view?.webview.postMessage({ command: 'focus', value: '/mod ' });
     };
 
@@ -250,7 +250,11 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
             this.view?.webview.postMessage({ command: 'message-done' });
         } catch (error: any) {
             if (error instanceof APIKeyError) {
-                vscode.window.showErrorMessage(error.message);
+                vscode.window.showErrorMessage(error.message, {}, {title: "Settings"}, {title: "Cancel"}).then(selection => {
+                    if (selection?.title === "Settings") {
+                        vscode.commands.executeCommand('workbench.action.openSettings', 'ask.apiKeys');
+                    }
+                });
             } else if (error instanceof APIResponseError) {
                 vscode.window.showErrorMessage(error.message);  // TODO: Show the entire error message
             } else {
@@ -343,8 +347,8 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
 export function activate(context: vscode.ExtensionContext) {
     const chatViewProvider = new ChatViewProvider(context);
 
-    context.subscriptions.push(vscode.commands.registerCommand('ask-vsc.ask', chatViewProvider.ask));
-    context.subscriptions.push(vscode.commands.registerCommand('ask-vsc.modify', chatViewProvider.modify));
-    context.subscriptions.push(vscode.window.registerWebviewViewProvider('ask-vsc.chat-view', chatViewProvider));
+    context.subscriptions.push(vscode.commands.registerCommand('ask.ask', chatViewProvider.ask));
+    context.subscriptions.push(vscode.commands.registerCommand('ask.modify', chatViewProvider.modify));
+    context.subscriptions.push(vscode.window.registerWebviewViewProvider('ask.chat-view', chatViewProvider));
 }
 export function deactivate() {}

@@ -31,9 +31,9 @@ export interface Model {
 }
 
 export const APIS: { [key: string]: API } = {
-    OpenAI: new API('https://api.openai.com/v1/chat/completions', 'OPENAI_API_KEY'),
-    Mistral: new API('https://api.mistral.ai/v1/chat/completions', 'MISTRAL_API_KEY'),
-    Anthropic: new AnthropicAPI('https://api.anthropic.com/v1/messages', 'ANTHROPIC_API_KEY'),
+    OpenAI: new API('https://api.openai.com/v1/chat/completions', 'openAI'),
+    Mistral: new API('https://api.mistral.ai/v1/chat/completions', 'mistral'),
+    Anthropic: new AnthropicAPI('https://api.anthropic.com/v1/messages', 'anthropic'),
 };
 
 export const MODELS: Model[] = [

@@ -2,7 +2,7 @@
   "name": "ask-vsc",
   "displayName": "Ask",
   "description": "Ask an LLM to help you with your code",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "repository": "https://github.com/mitchellgoffpc/ask-vsc",
   "publisher": "ask-vsc",
   "icon": "ask.png",
@@ -17,33 +17,33 @@
   "contributes": {
     "keybindings": [
       {
-        "command": "ask-vsc.chat-view.focus",
+        "command": "ask.chat-view.focus",
         "key": "ctrl+shift+a",
         "mac": "cmd+shift+a"
       },
       {
-        "command": "ask-vsc.ask",
+        "command": "ask.ask",
         "key": "ctrl+x a",
         "when": "editorTextFocus"
       },
       {
-        "command": "ask-vsc.modify",
+        "command": "ask.modify",
         "key": "ctrl+x i",
         "when": "editorTextFocus"
       },
       {
-        "command": "ask-vsc.modify",
+        "command": "ask.modify",
         "key": "ctrl+x m",
         "when": "editorTextFocus"
       }
     ],
     "commands": [
       {
-        "command": "ask-vsc.ask",
+        "command": "ask.ask",
         "title": "Ask"
       },
       {
-        "command": "ask-vsc.modify",
+        "command": "ask.modify",
         "title": "Modify"
       }
     ],
@@ -60,10 +60,30 @@
       "ask": [
         {
           "type": "webview",
-          "id": "ask-vsc.chat-view",
+          "id": "ask.chat-view",
           "name": "Ask"
         }
       ]
+    },
+    "configuration": {
+      "title": "Ask",
+      "properties": {
+        "ask.apiKeys.openAI": {
+          "type": "string",
+          "default": "",
+          "description": "OpenAI API Key"
+        },
+        "ask.apiKeys.mistral": {
+          "type": "string",
+          "default": "",
+          "description": "Mistral API Key"
+        },
+        "ask.apiKeys.anthropic": {
+          "type": "string",
+          "default": "",
+          "description": "Anthropic API Key"
+        }
+      }
     }
   },
   "scripts": {
