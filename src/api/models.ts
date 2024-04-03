@@ -43,5 +43,7 @@ export const MODELS: Model[] = [
     {id: 'open-mixtral-8x7b', name: "Mixtral", api: APIS.Mistral},
     {id: 'mistral-medium-latest', name: "Mistral Medium", api: APIS.Mistral},
     {id: 'mistral-large-latest', name: "Mistral Large", api: APIS.Mistral},
+    {id: 'claude-3-haiku-20240307', name: "Claude 3 Haiku", api: APIS.Anthropic},
+    {id: 'claude-3-sonnet-20240229', name: "Claude 3 Sonnet", api: APIS.Anthropic},
     {id: 'claude-3-opus-20240229', name: "Claude 3 Opus", api: APIS.Anthropic},
 ];
