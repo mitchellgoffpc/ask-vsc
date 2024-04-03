@@ -1,6 +1,7 @@
 const vscode = acquireVsCodeApi();
 
-const CHAT_PLACEHOLDER = "Ask ChatGPT a question and the response will appear here.";
+const TAGS = ["file", "null"];
+const CHAT_PLACEHOLDER = "Ask a question and the response will appear here.";
 const ROLE_NAMES: any = {
     user: "User",
     agent: "Agent",
@@ -65,9 +66,13 @@ function createElement(tag: string, attributes: any, children: HTMLElement[] | s
         if (key === 'style') {
             Object.assign(element.style, attributes[key]);
         } else if (key === 'className') {
-            element.classList.add(attributes[key]);
+            for (let className of (attributes[key] || "").split(' ')) {
+                if (className) {
+                    element.classList.add(className);
+                }
+            }
         } else if (key.startsWith('on') && attributes[key] instanceof Function) {
-            element.addEventListener(key.substring(2).toLowerCase(), attributes[key]);
+            element.addEventListener(key[2].toLowerCase() + key.substring(3), attributes[key]);
         } else {
             element.setAttribute(key, attributes[key]);
         }
@@ -179,22 +184,22 @@ function formatDiffChange(change: Diff.Change): string {
 
 function renderDiff(message: any): HTMLElement[] {
     return [
-        createElement('div', {className: 'chat-code'}, [
+        createElement('div', {className: 'code'}, [
             createElement('pre', {lang: 'diff'}, message.diff.map((change: Diff.Change) =>
                 createElement('span', {className: getDiffChangeClass(change)}, formatDiffChange(change))))
         ]),
         message.unfinished
           ? createElement('div', {}, '')
-          : createElement('button', {className: 'chat-approve', onClick: () => {
+          : createElement('button', {className: 'approve', onClick: () => {
                 vscode.postMessage({ command: 'approve', diff: message.diff });
             }}, "Approve")
     ];
 }
 
 function renderMessage(message: any): HTMLElement {
-    return createElement('div', {className: 'chat-message'}, [
-        createElement('div', {className: 'chat-header'}, ROLE_NAMES[message.role]),
-        createElement('div', {className: 'chat-body'},
+    return createElement('div', {className: 'message'}, [
+        createElement('div', {className: 'header'}, ROLE_NAMES[message.role]),
+        createElement('div', {className: 'body'},
             message.diff ? renderDiff(message) : [renderMarkdown(message.value)])]);
 }
 
@@ -202,8 +207,8 @@ function updateChatOutput(chatOutput: HTMLElement): void {
     let chatMessages = getState().chatMessages || [];
     chatOutput.replaceChildren(
         chatMessages.length
-          ? createElement('div', {className: 'chat-messages'}, chatMessages.map(renderMessage))
-          : createElement('span', {className: 'chat-placeholder'}, CHAT_PLACEHOLDER));
+          ? createElement('div', {className: 'messages'}, chatMessages.map(renderMessage))
+          : createElement('span', {className: 'placeholder'}, CHAT_PLACEHOLDER));
 }
 
 function updateChatInput(chatInput: HTMLTextAreaElement): void {
@@ -213,29 +218,86 @@ function updateChatInput(chatInput: HTMLTextAreaElement): void {
     autogrow(chatInput);
 }
 
+function showAutocomplete(textarea: HTMLTextAreaElement, autocomplete: HTMLElement): void {
+    let tagStart = textarea.value.lastIndexOf('@', textarea.selectionStart);
+    let tagValue = textarea.value.substring(tagStart + 1, textarea.selectionStart);
+    let validOptions = TAGS.filter(option => option.startsWith(tagValue));
+    if (validOptions.length) {
+        autocomplete.style.display = "block";
+        autocomplete.replaceChildren(...validOptions.map((option, i) =>
+            createElement("div", {
+                className: i === 0 ? "option selected" : "option",
+                onClick: () => fillAutocomplete(textarea, autocomplete, option)
+            }, `@${option}`)));
+    } else {
+        hideAutocomplete(autocomplete);
+    }
+}
+
+function hideAutocomplete(autocomplete: HTMLElement): void {
+    autocomplete.style.display = "none";
+}
+
+function fillAutocomplete(textarea: HTMLTextAreaElement, autocomplete: HTMLElement, value: string): void {
+    let tagStart = textarea.value.lastIndexOf('@', textarea.selectionStart);
+    textarea.value = textarea.value.substring(0, tagStart) + value + textarea.value.substring(textarea.selectionEnd);
+    hideAutocomplete(autocomplete);
+}
+
 
 // Event Handlers
+
+function handleAutocompleteKeypress(event: KeyboardEvent, textarea: HTMLTextAreaElement, autocomplete: HTMLElement): void {
+    let options = Array.from(autocomplete.querySelectorAll('.option'));
+    let index = options.findIndex(option => option.classList.contains('selected'));
+
+    if (event.key === 'Escape') {
+        event.preventDefault();
+        hideAutocomplete(autocomplete);
+    } else if (event.key === 'Enter') {
+        event.preventDefault();
+        fillAutocomplete(textarea, autocomplete, options[index].textContent || "");
+    } else  if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        let nextIndex = event.key === 'ArrowDown'
+            ? (index + 1) % options.length
+            : (index + options.length - 1) % options.length;
+        options.forEach((option, i) => option.classList.toggle('selected', i === nextIndex));
+    }
+}
+
+function handleAutocompleteInput(textarea: HTMLTextAreaElement, autocomplete: HTMLElement): void {
+    let tagStart = textarea.value.lastIndexOf('@', textarea.selectionStart);
+    let tagValue = textarea.value.substring(tagStart + 1, textarea.selectionStart);
+    if (tagValue.includes(' ')) {
+        hideAutocomplete(autocomplete);
+    } else {
+        showAutocomplete(textarea, autocomplete);
+    }
+}
 
 document.addEventListener('DOMContentLoaded', function() {
     let chatOutput = document.querySelector('.chat-output') as HTMLElement;
     let chatInput = document.querySelector('.chat-input textarea') as HTMLTextAreaElement;
-    let chatSubmit = document.querySelector('.chat-input .chat-send') as HTMLElement;
-    let chatModelSelect = document.querySelector('.chat-input .chat-model-select') as HTMLElement;
-    let chatModelName = document.querySelector('.chat-input .chat-model-name') as HTMLElement;
+    let chatSubmit = document.querySelector('.chat-input .send') as HTMLElement;
+    let chatAutocomplete = document.querySelector('.chat-input .autocomplete') as HTMLElement;
+    let chatModelSelect = document.querySelector('.chat-input .model-select') as HTMLElement;
+    let chatModelName = document.querySelector('.chat-input .model-name') as HTMLElement;
     if (!chatOutput || !chatInput || !chatSubmit || !chatModelSelect) { return; }
 
     updateChatOutput(chatOutput);
     updateChatInput(chatInput);
 
-    function submit() {
+    function submit(isModification: boolean) {
         if (chatInput && chatInput.value) {
-            vscode.postMessage({ command: 'send', value: chatInput.value });
+            vscode.postMessage({ command: 'send', value: chatInput.value, isModification });
             updateState(state => ({...state, text: "", chatHistoryOffset: -1, chatHistory: [chatInput.value, ...state.chatHistory]}));
             updateChatInput(chatInput);
         }
     }
 
     chatInput.addEventListener('input', () => {
+        handleAutocompleteInput(chatInput, chatAutocomplete);
         updateState(state =>
             state.chatHistoryOffset >= 0
                 ? {...state, chatHistory: [...state.chatHistory.slice(0, state.chatHistoryOffset), chatInput.value, ...state.chatHistory.slice(state.chatHistoryOffset + 1)]}
@@ -244,10 +306,12 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 
     chatInput.addEventListener('keydown', e => {
-        if (e.key === 'Enter' && !e.shiftKey) {
+        if (chatAutocomplete.style.display === "block") {
+            handleAutocompleteKeypress(e, chatInput, chatAutocomplete);
+        } else if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
-            submit();
-        } if (e.key === 'PageUp' || (e.key === 'ArrowUp' && getCursorLine(chatInput) === 0)) {
+            submit(e.ctrlKey || e.metaKey);
+        } else if (e.key === 'PageUp' || (e.key === 'ArrowUp' && getCursorLine(chatInput) === 0)) {
             e.preventDefault();
             updateState(state => ({...state, chatHistoryOffset: Math.min(state.chatHistoryOffset + 1, state.chatHistory.length - 1)}));
             updateChatInput(chatInput);
@@ -257,10 +321,12 @@ document.addEventListener('DOMContentLoaded', function() {
             updateChatInput(chatInput);
         } else if (e.key === 'g' && e.ctrlKey) {
             vscode.postMessage({ command: 'unfocus' });
+        } else if (e.key === '@') {
+            showAutocomplete(chatInput, chatAutocomplete);
         }
     });
 
-    chatSubmit.addEventListener('click', submit);
+    chatSubmit.addEventListener('click', e => submit(e.ctrlKey || e.metaKey));
 
     chatModelSelect.addEventListener('click', e => {
         chatModelSelect.classList.toggle('open');
@@ -281,8 +347,8 @@ document.addEventListener('DOMContentLoaded', function() {
             updateChatOutput(chatOutput);
         } else if (message.command === 'message-update') {
             updateState(state => ({...state, chatMessages: [...state.chatMessages.slice(0, -1), message]}));
-            let lastMessage = chatOutput.querySelector('.chat-messages > .chat-message:last-child');
-            let body = lastMessage?.querySelector('.chat-body');
+            let lastMessage = chatOutput.querySelector('.messages > .message:last-child');
+            let body = lastMessage?.querySelector('.body');
             let newBody = message.diff
               ? renderDiff({...message, unfinished: true})
               : [renderMarkdown(message.value)];

@@ -121,13 +121,13 @@ textarea::-webkit-scrollbar {
     overflow-y: auto;
 }
 
-.chat-output .chat-placeholder {
+.chat-output .placeholder {
     display: block;
     padding: 0 var(--container-padding-horizontal);
     color: var(--vscode-editor-foreground);
 }
 
-.chat-output .chat-message {
+.chat-output .message {
     display: flex;
     flex-direction: column;
     align-items: stretch;
@@ -135,30 +135,30 @@ textarea::-webkit-scrollbar {
     border-bottom: 3px solid var(--vscode-editor-background);
     color: var(--vscode-editor-foreground);
 }
-.chat-output .chat-message:first-of-type {
+.chat-output .message:first-of-type {
     padding-top: 0;
 }
-.chat-output .chat-message:last-of-type {
+.chat-output .message:last-of-type {
     border-bottom: none;
 }
 
-.chat-output .chat-message .chat-header {
+.chat-output .message .header {
     font-weight: 600;
 }
 
-.chat-output .chat-message .chat-code {
+.chat-output .message .code {
     max-width: 100%;
     overflow-x: scroll;
     overflow-y: hidden;
 }
 
-.chat-output .chat-message .chat-code pre span {
+.chat-output .message .code pre span {
     color: var(--vscode-editor-foreground);
 }
-.chat-output .chat-message .chat-code pre span.add {
+.chat-output .message .code pre span.add {
     color: #98c379;
 }
-.chat-output .chat-message .chat-code pre span.remove {
+.chat-output .message .code pre span.remove {
     color: #e06c75;
 }
 
@@ -168,7 +168,8 @@ textarea::-webkit-scrollbar {
     margin: 0 var(--container-padding-horizontal);
 }
 
-.chat-input .chat-input-box {
+.chat-input .input-box {
+    position: relative;
     display: flex;
     flex-direction: row;
     align-items: center;
@@ -178,13 +179,13 @@ textarea::-webkit-scrollbar {
     border-radius: 3px;
 }
 
-.chat-input .chat-settings {
+.chat-input .settings {
     display: flex;
     flex-direction: row;
     justify-content: flex-end;
 }
 
-.chat-input .chat-settings .chat-model-select {
+.chat-input .settings .model-select {
     position: relative;
     cursor: pointer;
     font-size: 0.9em;
@@ -192,13 +193,13 @@ textarea::-webkit-scrollbar {
     user-select: none;
 }
 
-.chat-input .chat-settings .chat-model-select > .codicon,
-.chat-input .chat-settings .chat-model-select > .chat-model-name {
+.chat-input .settings .model-select > .codicon,
+.chat-input .settings .model-select > .model-name {
     vertical-align: middle;
     color: var(--vscode-editor-foreground);
 }
 
-.chat-input .chat-settings .chat-model-options {
+.chat-input .settings .model-options {
     display: none;
     position: absolute;
     bottom: 100%;
@@ -209,17 +210,17 @@ textarea::-webkit-scrollbar {
     overflow: hidden;
     white-space: nowrap;
 }
-.chat-input .chat-settings .chat-model-select.open .chat-model-options {
+.chat-input .settings .model-select.open .model-options {
     display: block;
 }
 
-.chat-input .chat-settings .chat-model-options > div {
+.chat-input .settings .model-options > div {
     padding: 0 var(--input-padding-horizontal);
     color: var(--vscode-editor-foreground);
     /* text-align: right; */
     cursor: pointer;
 }
-.chat-input .chat-settings .chat-model-options > div:hover {
+.chat-input .settings .model-options > div:hover {
     background-color: var(--vscode-button-hoverBackground);
 }
 
@@ -228,12 +229,27 @@ textarea::-webkit-scrollbar {
     background-color: transparent;
 }
 
-.chat-input .chat-send {
+.chat-input .send {
     width: 20px;
     padding-left: var(--input-padding-horizontal);
     text-align: center;
 }
-.chat-input .chat-send .codicon {
+.chat-input .send .codicon {
     vertical-align: middle;
     cursor: pointer;
+}
+.chat-input .autocomplete {
+    position: absolute;
+    left: 0;
+    bottom: 100%;
+    display: none;
+    background-color: var(--vscode-input-background);
+}
+.chat-input .autocomplete .option {
+    padding: 3px var(--input-padding-horizontal);
+    color: var(--vscode-editor-foreground);
+    cursor: pointer;
+}
+.chat-input .autocomplete .option.selected {
+    background-color: var(--vscode-button-hoverBackground);
 }

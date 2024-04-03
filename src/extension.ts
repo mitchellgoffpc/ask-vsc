@@ -84,13 +84,31 @@ function applyIndentationLevel(text: string, indentationLevel: number): string {
     }
 }
 
-function getTextWithPoint(editor: vscode.TextEditor): string {
-    const text = editor.document.getText();
-    if (editor.selection.isEmpty) {
-        const offset = editor.document.offsetAt(editor.selection.active);
+function getDocumentText(document: vscode.TextDocument, selection: vscode.Selection, addInsertionPoint: boolean = false): string {
+    const text = document.getText();
+    if (addInsertionPoint && selection.isEmpty) {
+        const offset = document.offsetAt(selection.active);
         return text.slice(0, offset) + "TODO: WRITE CODE HERE" + text.slice(offset);
     } else {
         return text;
+    }
+}
+
+function getCellText(cell: vscode.NotebookCell, editor: vscode.TextEditor, notebook: vscode.NotebookEditor, addInsertionPoint: boolean): string {
+    const cellIsActive = cell.document === editor.document;
+    const cellText = getDocumentText(cell.document, editor.selection, cellIsActive && addInsertionPoint);
+    if (cell.kind === vscode.NotebookCellKind.Markup) {
+        return `"""\n${cellText}\n"""`;  // TODO: Make this work for non-python code
+    } else {
+        return cellText;
+    }
+}
+
+function getWorkspaceText(editor: vscode.TextEditor, notebook: vscode.NotebookEditor | undefined, addInsertionPoint: boolean = false): string {
+    if (notebook) {
+        return notebook.notebook.getCells().map(cell => getCellText(cell, editor, notebook, addInsertionPoint)).join("\n\n");
+    } else {
+        return getDocumentText(editor.document, editor.selection, addInsertionPoint);
     }
 }
 
@@ -121,12 +139,13 @@ function createPrompt(messages: Message[]): string {
 // API functions
 
 async function* ask(question: string, model: Model, controller: AbortController): AsyncIterable<string> {
+    const activeNotebook = vscode.window.activeNotebookEditor;
     const activeEditor = vscode.window.activeTextEditor;
     if (question && activeEditor) {
         const [_, selectedText] = getSelectedText(activeEditor);
         const prompt = createPrompt([
             { type: "prompt", value: CODE_PROMPT },
-            { type: "code",   value: activeEditor.document.getText() || null },
+            { type: "code",   value: getWorkspaceText(activeEditor, activeNotebook) },
             { type: "prompt", value: "Now, please answer the following question:" },
             { type: "code",   value: selectedText },
             { type: "prompt", value: question }
@@ -138,6 +157,7 @@ async function* ask(question: string, model: Model, controller: AbortController)
 }
 
 async function* modify(question: string, model: Model, controller: AbortController): AsyncIterable<Diff.Change[]> {
+    const activeNotebook = vscode.window.activeNotebookEditor;
     const activeEditor = vscode.window.activeTextEditor;
     if (question && activeEditor) {
         const [selectedRange, selectedText] = getSelectedText(activeEditor);
@@ -146,7 +166,7 @@ async function* modify(question: string, model: Model, controller: AbortControll
         const commonMessages: Message[] = [
             { type: "prompt", value: SYSTEM_PROMPT },
             { type: "prompt", value: CODE_PROMPT },
-            { type: "code",   value: getTextWithPoint(activeEditor) }
+            { type: "code",   value: getWorkspaceText(activeEditor, activeNotebook, true) }
         ];
         const actionMessages: Message[] = selectedText ? [
             { type: "prompt", value: "Your task is to modify the following code (and ONLY the following code) as described below:" },
@@ -197,10 +217,6 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
         vscode.commands.executeCommand('ask.chat-view.focus');
         this.view?.webview.postMessage({ command: 'focus', value: '' });
     };
-    modify = () => {
-        vscode.commands.executeCommand('ask.chat-view.focus');
-        this.view?.webview.postMessage({ command: 'focus', value: '/mod ' });
-    };
 
     getModel(): Model {
         const modelID = this.context.workspaceState.get<string>('modelID');
@@ -218,31 +234,29 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
 
     handleMessage = async (data: any) => {
         if (data.command === 'send') {
-            await this.handleSendMessage(data.value);
+            await this.handleSendMessage(data.value, data.isModification);
         } else if (data.command === "approve") {
             await this.handleApproveDiff(data.diff);
         } else if (data.command === "model") {
             this.setModel(data.value);
         } else if (data.command === "getstate") {
-            this.view?.webview.postMessage({ command: 'state', value: {model: this.getModel()}});
+            this.view?.webview.postMessage({ command: 'state', value: { model: this.getModel() }});
         } else if (data.command === "unfocus") {
             vscode.commands.executeCommand('workbench.action.focusActiveEditorGroup');
         }
     };
 
-    async handleSendMessage(message: string) {
+    async handleSendMessage(message: string, isModification: boolean) {
         try {
             this.abortRequest();
             this.view?.webview.postMessage({ command: 'clear' });
-            if (message.startsWith('/mod ')) {
-                this.view?.webview.postMessage({ command: 'message', role: "user", value: message.slice(5) });
-                this.view?.webview.postMessage({ command: 'message', role: "agent", value: "" });
-                for await (let update of modify(message.slice(5), this.getModel(), this.controller)) {
+            this.view?.webview.postMessage({ command: 'message', role: "user", value: message });
+            this.view?.webview.postMessage({ command: 'message', role: "agent", value: "" });
+            if (isModification) {
+                for await (let update of modify(message, this.getModel(), this.controller)) {
                     this.view?.webview.postMessage({ command: 'message-update', role: "agent", diff: update });
                 }
             } else {
-                this.view?.webview.postMessage({ command: 'message', role: "user", value: message });
-                this.view?.webview.postMessage({ command: 'message', role: "agent", value: "" });
                 for await (let update of ask(message, this.getModel(), this.controller)) {
                     this.view?.webview.postMessage({ command: 'message-update', role: "agent", value: update });
                 }
@@ -317,20 +331,21 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
                     <div class="chat-output"></div>
 
                     <div class="chat-input">
-                        <div class="chat-settings">
-                            <div class="chat-model-select">
-                                <span class="chat-model-name"></span>
+                        <div class="settings">
+                            <div class="model-select">
+                                <span class="model-name"></span>
                                 <i class="codicon codicon-chevron-up"></i>
-                                <div class="chat-model-options">
+                                <div class="model-options">
                                     ${MODELS.map(model =>`<div data-value="${model.name}">${model.name}</div>`).join('')}
                                 </div>
                             </div>
                         </div>
-                        <div class="chat-input-box">
-                            <textarea placeholder="Ask a question!" class="chat-message"></textarea>
-                            <div class="chat-send">
+                        <div class="input-box">
+                            <textarea placeholder="Ask a question!" class="message"></textarea>
+                            <div class="send">
                                 <i class="codicon codicon-send"></i>
                             </div>
+                            <div class="autocomplete"></div>
                         </div>
                     </div>
 
@@ -348,7 +363,6 @@ export function activate(context: vscode.ExtensionContext) {
     const chatViewProvider = new ChatViewProvider(context);
 
     context.subscriptions.push(vscode.commands.registerCommand('ask.ask', chatViewProvider.ask));
-    context.subscriptions.push(vscode.commands.registerCommand('ask.modify', chatViewProvider.modify));
     context.subscriptions.push(vscode.window.registerWebviewViewProvider('ask.chat-view', chatViewProvider));
 }
 export function deactivate() {}
