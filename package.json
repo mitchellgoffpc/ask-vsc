@@ -23,28 +23,14 @@
       },
       {
         "command": "ask.ask",
-        "key": "ctrl+x a",
-        "when": "editorTextFocus"
-      },
-      {
-        "command": "ask.modify",
-        "key": "ctrl+x i",
-        "when": "editorTextFocus"
-      },
-      {
-        "command": "ask.modify",
-        "key": "ctrl+x m",
-        "when": "editorTextFocus"
+        "key": "ctrl+m",
+        "mac": "cmd-m"
       }
     ],
     "commands": [
       {
         "command": "ask.ask",
         "title": "Ask"
-      },
-      {
-        "command": "ask.modify",
-        "title": "Modify"
       }
     ],
     "viewsContainers": {
