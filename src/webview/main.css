@@ -229,12 +229,12 @@ textarea::-webkit-scrollbar {
     background-color: transparent;
 }
 
-.chat-input .send {
+.chat-input .submit {
     width: 20px;
     padding-left: var(--input-padding-horizontal);
     text-align: center;
 }
-.chat-input .send .codicon {
+.chat-input .submit .codicon {
     vertical-align: middle;
     cursor: pointer;
 }

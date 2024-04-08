@@ -1,6 +1,6 @@
 const vscode = acquireVsCodeApi();
 
-const TAGS = ["file", "null"];
+const TAGS = ["@file", "@tab", "@workspace"];
 const CHAT_PLACEHOLDER = "Ask a question and the response will appear here.";
 const ROLE_NAMES: any = {
     user: "User",
@@ -31,6 +31,14 @@ function getState(): State {
 
 function updateState(getNextState: (state: State) => State): void {
     vscode.setState(getNextState(getState()));
+}
+
+let messageCallbacks: { [command: string]: (value: any) => void } = {};
+async function sendMessage(message: any): Promise<any> {
+    return new Promise(resolve => {
+        messageCallbacks[message.command] = resolve;
+        vscode.postMessage(message);
+    });
 }
 
 
@@ -218,17 +226,17 @@ function updateChatInput(chatInput: HTMLTextAreaElement): void {
     autogrow(chatInput);
 }
 
-function showAutocomplete(textarea: HTMLTextAreaElement, autocomplete: HTMLElement): void {
-    let tagStart = textarea.value.lastIndexOf('@', textarea.selectionStart);
-    let tagValue = textarea.value.substring(tagStart + 1, textarea.selectionStart);
-    let validOptions = TAGS.filter(option => option.startsWith(tagValue));
+function showAutocomplete(textarea: HTMLTextAreaElement, autocomplete: HTMLElement, options: string[]): void {
+    let tagStart = textarea.value.lastIndexOf(' ', textarea.selectionStart) + 1;
+    let tagValue = textarea.value.substring(tagStart, textarea.selectionStart);
+    let validOptions = options.filter(option => option.startsWith(tagValue) && option !== tagValue);
     if (validOptions.length) {
         autocomplete.style.display = "block";
         autocomplete.replaceChildren(...validOptions.map((option, i) =>
             createElement("div", {
                 className: i === 0 ? "option selected" : "option",
                 onClick: () => fillAutocomplete(textarea, autocomplete, option)
-            }, `@${option}`)));
+            }, option)));
     } else {
         hideAutocomplete(autocomplete);
     }
@@ -239,9 +247,9 @@ function hideAutocomplete(autocomplete: HTMLElement): void {
 }
 
 function fillAutocomplete(textarea: HTMLTextAreaElement, autocomplete: HTMLElement, value: string): void {
-    let tagStart = textarea.value.lastIndexOf('@', textarea.selectionStart);
-    textarea.value = textarea.value.substring(0, tagStart) + value + textarea.value.substring(textarea.selectionEnd);
-    hideAutocomplete(autocomplete);
+    let tagStart = textarea.value.lastIndexOf(' ', textarea.selectionStart) + 1;
+    textarea.value = textarea.value.substring(0, tagStart) + value + ' ' + textarea.value.substring(textarea.selectionEnd);
+    handleAutocompleteInput(textarea, autocomplete);
 }
 
 
@@ -250,36 +258,41 @@ function fillAutocomplete(textarea: HTMLTextAreaElement, autocomplete: HTMLEleme
 function handleAutocompleteKeypress(event: KeyboardEvent, textarea: HTMLTextAreaElement, autocomplete: HTMLElement): void {
     let options = Array.from(autocomplete.querySelectorAll('.option'));
     let index = options.findIndex(option => option.classList.contains('selected'));
+    let isUpKey = event.key === 'ArrowUp' || (event.key === 'p' && event.ctrlKey);
+    let isDownKey = event.key === 'ArrowDown' || (event.key === 'n' && event.ctrlKey);
 
-    if (event.key === 'Escape') {
+    if (event.key === 'Escape' || (event.key === 'g' && event.ctrlKey)) {
         event.preventDefault();
         hideAutocomplete(autocomplete);
-    } else if (event.key === 'Enter') {
+    } else if (event.key === 'Enter' || event.key === 'Tab' || event.key === 'ArrowRight' || (event.key === 'e' && event.ctrlKey)) {
         event.preventDefault();
         fillAutocomplete(textarea, autocomplete, options[index].textContent || "");
-    } else  if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+    } else  if (isUpKey || isDownKey) {
         event.preventDefault();
-        let nextIndex = event.key === 'ArrowDown'
+        let nextIndex = isDownKey
             ? (index + 1) % options.length
             : (index + options.length - 1) % options.length;
         options.forEach((option, i) => option.classList.toggle('selected', i === nextIndex));
     }
 }
 
-function handleAutocompleteInput(textarea: HTMLTextAreaElement, autocomplete: HTMLElement): void {
+async function handleAutocompleteInput(textarea: HTMLTextAreaElement, autocomplete: HTMLElement): Promise<void> {
     let tagStart = textarea.value.lastIndexOf('@', textarea.selectionStart);
     let tagValue = textarea.value.substring(tagStart + 1, textarea.selectionStart);
-    if (tagValue.includes(' ')) {
-        hideAutocomplete(autocomplete);
+    if (tagStart >= 0 && !tagValue.includes(' ')) {
+        showAutocomplete(textarea, autocomplete, TAGS);
+    } else if (tagValue.startsWith('tab ') && tagValue.indexOf(' ', 4) === -1) {
+        let tabNames = await sendMessage({ command: 'gettabs' });
+        showAutocomplete(textarea, autocomplete, tabNames);
     } else {
-        showAutocomplete(textarea, autocomplete);
+        hideAutocomplete(autocomplete);
     }
 }
 
 document.addEventListener('DOMContentLoaded', function() {
     let chatOutput = document.querySelector('.chat-output') as HTMLElement;
     let chatInput = document.querySelector('.chat-input textarea') as HTMLTextAreaElement;
-    let chatSubmit = document.querySelector('.chat-input .send') as HTMLElement;
+    let chatSubmit = document.querySelector('.chat-input .submit') as HTMLElement;
     let chatAutocomplete = document.querySelector('.chat-input .autocomplete') as HTMLElement;
     let chatModelSelect = document.querySelector('.chat-input .model-select') as HTMLElement;
     let chatModelName = document.querySelector('.chat-input .model-name') as HTMLElement;
@@ -290,7 +303,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     function submit(isModification: boolean) {
         if (chatInput && chatInput.value) {
-            vscode.postMessage({ command: 'send', value: chatInput.value, isModification });
+            vscode.postMessage({ command: 'submit', value: chatInput.value, isModification });
             updateState(state => ({...state, text: "", chatHistoryOffset: -1, chatHistory: [chatInput.value, ...state.chatHistory]}));
             updateChatInput(chatInput);
         }
@@ -321,8 +334,6 @@ document.addEventListener('DOMContentLoaded', function() {
             updateChatInput(chatInput);
         } else if (e.key === 'g' && e.ctrlKey) {
             vscode.postMessage({ command: 'unfocus' });
-        } else if (e.key === '@') {
-            showAutocomplete(chatInput, chatAutocomplete);
         }
     });
 
@@ -356,12 +367,14 @@ document.addEventListener('DOMContentLoaded', function() {
         } else if (message.command === 'message-done') {
             updateChatOutput(chatOutput);
         } else if (message.command === 'focus') {
-            updateState(state => ({...state, text: message.value}));
-            updateChatInput(chatInput);
+            chatInput.focus();
         } else if (message.command === 'state') {
             // updateState(state => ({...state, chatMessages: message.value.chatMessages}));
             // updateChatOutput(chatOutput);
             chatModelName.textContent = message.value.model.name;
+        } else if (message.command in messageCallbacks) {
+            messageCallbacks[message.command](message.value);
+            delete messageCallbacks[message.command];
         }
     });
 

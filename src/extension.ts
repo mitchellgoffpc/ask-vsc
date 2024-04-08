@@ -8,15 +8,17 @@ const SYSTEM_PROMPT =
   "Whenever you are asked to write code, you should return only the code, " +
   "with no additional context or messages.";
 const CODE_PROMPT =
-  "The following is a file that I'm currently working on. " +
+  "The following is some code that I'm currently working on. " +
   "It may be relevant to help answer my questions.";
 const INSERT_PROMPT =
   "The code you write will be inserted in my code where it says 'TODO: WRITE CODE HERE'.";
 const POST_PROMPT = "Please remember to return just the code, with no additional context or explanations.";
 
+type Document = vscode.TextDocument | vscode.NotebookDocument | undefined;
 type Message = {
     type: "prompt" | "code";
     value: string | null;
+    name?: string;
 };
 
 
@@ -84,7 +86,14 @@ function applyIndentationLevel(text: string, indentationLevel: number): string {
     }
 }
 
-function getDocumentText(document: vscode.TextDocument, selection: vscode.Selection, addInsertionPoint: boolean = false): string {
+function isNotebookDocument(document: Document): document is vscode.NotebookDocument {
+    return typeof document !== 'undefined' && 'cellCount' in document;
+}
+function isTextDocument(document: Document): document is vscode.TextDocument {
+    return typeof document !== 'undefined' && 'lineCount' in document;
+}
+
+function getTextDocumentText(document: vscode.TextDocument, selection: vscode.Selection, addInsertionPoint: boolean = false): string {
     const text = document.getText();
     if (addInsertionPoint && selection.isEmpty) {
         const offset = document.offsetAt(selection.active);
@@ -94,9 +103,9 @@ function getDocumentText(document: vscode.TextDocument, selection: vscode.Select
     }
 }
 
-function getCellText(cell: vscode.NotebookCell, editor: vscode.TextEditor, notebook: vscode.NotebookEditor, addInsertionPoint: boolean): string {
+function getCellText(cell: vscode.NotebookCell, editor: vscode.TextEditor, addInsertionPoint: boolean): string {
     const cellIsActive = cell.document === editor.document;
-    const cellText = getDocumentText(cell.document, editor.selection, cellIsActive && addInsertionPoint);
+    const cellText = getTextDocumentText(cell.document, editor.selection, cellIsActive && addInsertionPoint);
     if (cell.kind === vscode.NotebookCellKind.Markup) {
         return `"""\n${cellText}\n"""`;  // TODO: Make this work for non-python code
     } else {
@@ -104,12 +113,32 @@ function getCellText(cell: vscode.NotebookCell, editor: vscode.TextEditor, noteb
     }
 }
 
-function getWorkspaceText(editor: vscode.TextEditor, notebook: vscode.NotebookEditor | undefined, addInsertionPoint: boolean = false): string {
-    if (notebook) {
-        return notebook.notebook.getCells().map(cell => getCellText(cell, editor, notebook, addInsertionPoint)).join("\n\n");
+function getDocumentText(document: Document, editor: vscode.TextEditor, addInsertionPoint: boolean = false): string {
+    if (isNotebookDocument(document)) {
+        return document.getCells().map(cell => getCellText(cell, editor, addInsertionPoint)).join("\n\n");
     } else {
-        return getDocumentText(editor.document, editor.selection, addInsertionPoint);
+        return getTextDocumentText(editor.document, editor.selection, addInsertionPoint);
     }
+}
+
+async function getCodeMessages(question: string, activeDocument: Document, editor: vscode.TextEditor, addInsertionPoint: boolean = false): Promise<Message[]> {
+    let messages: Message[] = [];
+    let tags = question.match(/@workspace\b|@tab\s+\S+|@file\s+\S+/g) || [];
+    for (let tag of tags) {
+        if (tag.startsWith("@tab")) {
+            let tabName = tag.split(/\s+/)[1];
+            let tabs = vscode.window.tabGroups.all.flatMap(group => group.tabs);
+            let tab = tabs.find(tab => tab.label === tabName);
+            if (tab && tab.input instanceof vscode.TabInputText) {
+                let document = await vscode.workspace.openTextDocument(tab.input.uri);
+                messages.push({ type: "code", value: getDocumentText(document, editor, false), name: document.uri.path });
+            } else if (tab && tab.input instanceof vscode.TabInputNotebook) {
+                let document = await vscode.workspace.openNotebookDocument(tab.input.uri);
+                messages.push({ type: "code", value: getDocumentText(document, editor, false), name: document.uri.path });
+            }
+        }
+    }
+    return [...messages, { type: "code",  value: getDocumentText(activeDocument, editor, addInsertionPoint), name: activeDocument?.uri.path }];
 }
 
 function getSelectedText(editor: vscode.TextEditor): [vscode.Range, string | null] {
@@ -123,10 +152,14 @@ function getSelectedText(editor: vscode.TextEditor): [vscode.Range, string | nul
     }
 }
 
+function removeTags(text: string): string {
+    return text.replace(/@workspace\b|@tab\s+\S+|@file\s+\S+/g, "").trim();
+}
+
 function formatMessage(message: Message): string | null {
     return message.value === null    ? null :
            message.type === "prompt" ? message.value :
-           message.type === "code"   ? "```\n" + message.value + "\n```" :
+           message.type === "code"   ? (message.name ? `${message.name}\n` : "") + "```\n" + message.value + "\n```" :
                                        null;
 }
 
@@ -139,16 +172,16 @@ function createPrompt(messages: Message[]): string {
 // API functions
 
 async function* ask(question: string, model: Model, controller: AbortController): AsyncIterable<string> {
-    const activeNotebook = vscode.window.activeNotebookEditor;
     const activeEditor = vscode.window.activeTextEditor;
+    const activeDocument = vscode.window.activeNotebookEditor?.notebook || activeEditor?.document;
     if (question && activeEditor) {
         const [_, selectedText] = getSelectedText(activeEditor);
         const prompt = createPrompt([
             { type: "prompt", value: CODE_PROMPT },
-            { type: "code",   value: getWorkspaceText(activeEditor, activeNotebook) },
+            ...await getCodeMessages(question, activeDocument, activeEditor),
             { type: "prompt", value: "Now, please answer the following question:" },
             { type: "code",   value: selectedText },
-            { type: "prompt", value: question }
+            { type: "prompt", value: removeTags(question) }
         ]);
         yield* accumulate(query(prompt, model, controller));
     } else {
@@ -157,8 +190,8 @@ async function* ask(question: string, model: Model, controller: AbortController)
 }
 
 async function* modify(question: string, model: Model, controller: AbortController): AsyncIterable<Diff.Change[]> {
-    const activeNotebook = vscode.window.activeNotebookEditor;
     const activeEditor = vscode.window.activeTextEditor;
+    const activeDocument: Document = vscode.window.activeNotebookEditor?.notebook || activeEditor?.document;
     if (question && activeEditor) {
         const [selectedRange, selectedText] = getSelectedText(activeEditor);
         const indentationLevel = selectedText ? getIndentationLevel(selectedText) : activeEditor.selection.start.character;
@@ -166,15 +199,15 @@ async function* modify(question: string, model: Model, controller: AbortControll
         const commonMessages: Message[] = [
             { type: "prompt", value: SYSTEM_PROMPT },
             { type: "prompt", value: CODE_PROMPT },
-            { type: "code",   value: getWorkspaceText(activeEditor, activeNotebook, true) }
+            ...await getCodeMessages(question, activeDocument, activeEditor, true),
         ];
         const actionMessages: Message[] = selectedText ? [
             { type: "prompt", value: "Your task is to modify the following code (and ONLY the following code) as described below:" },
             { type: "code",   value: selectedText },
-            { type: "prompt", value: question + " " + POST_PROMPT }
+            { type: "prompt", value: `${removeTags(question)} ${POST_PROMPT}` }
         ] : [
             { type: "prompt", value: "Your task is as follows:" },
-            { type: "prompt", value: question + " " + INSERT_PROMPT + " " + POST_PROMPT }
+            { type: "prompt", value: `${removeTags(question)} ${INSERT_PROMPT} ${POST_PROMPT}` }
         ];
 
         const prompt = createPrompt([...commonMessages, ...actionMessages]);
@@ -215,7 +248,7 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
 
     ask = () => {
         vscode.commands.executeCommand('ask.chat-view.focus');
-        this.view?.webview.postMessage({ command: 'focus', value: '' });
+        this.view?.webview.postMessage({ command: 'focus' });
     };
 
     getModel(): Model {
@@ -233,20 +266,24 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
     }
 
     handleMessage = async (data: any) => {
-        if (data.command === 'send') {
-            await this.handleSendMessage(data.value, data.isModification);
+        if (data.command === 'submit') {
+            await this.handleSubmit(data.value, data.isModification);
         } else if (data.command === "approve") {
             await this.handleApproveDiff(data.diff);
         } else if (data.command === "model") {
             this.setModel(data.value);
         } else if (data.command === "getstate") {
             this.view?.webview.postMessage({ command: 'state', value: { model: this.getModel() }});
+        } else if (data.command === 'gettabs') {
+            const tabGroups = vscode.window.tabGroups.all;
+            const tabNames = tabGroups.flatMap(group => group.tabs.map(tab => tab.label));
+            this.view?.webview.postMessage({ command: 'gettabs', value: tabNames });
         } else if (data.command === "unfocus") {
             vscode.commands.executeCommand('workbench.action.focusActiveEditorGroup');
         }
     };
 
-    async handleSendMessage(message: string, isModification: boolean) {
+    async handleSubmit(message: string, isModification: boolean) {
         try {
             this.abortRequest();
             this.view?.webview.postMessage({ command: 'clear' });
@@ -342,7 +379,7 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
                         </div>
                         <div class="input-box">
                             <textarea placeholder="Ask a question!" class="message"></textarea>
-                            <div class="send">
+                            <div class="submit">
                                 <i class="codicon codicon-send"></i>
                             </div>
                             <div class="autocomplete"></div>
