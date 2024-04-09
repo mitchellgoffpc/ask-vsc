@@ -235,7 +235,6 @@ function showAutocomplete(textarea: HTMLTextAreaElement, autocomplete: HTMLEleme
         autocomplete.replaceChildren(...validOptions.map((option, i) =>
             createElement("div", {
                 className: i === 0 ? "option selected" : "option",
-                onClick: () => fillAutocomplete(textarea, autocomplete, option)
             }, option)));
     } else {
         hideAutocomplete(autocomplete);
@@ -284,6 +283,9 @@ async function handleAutocompleteInput(textarea: HTMLTextAreaElement, autocomple
     } else if (tagValue.startsWith('tab ') && tagValue.indexOf(' ', 4) === -1) {
         let tabNames = await sendMessage({ command: 'gettabs' });
         showAutocomplete(textarea, autocomplete, tabNames);
+    } else if (tagValue.startsWith('file ') && tagValue.indexOf(' ', 5) === -1) {
+        let fileNames = await sendMessage({ command: 'getfiles', value: tagValue.substring(5) });
+        showAutocomplete(textarea, autocomplete, fileNames);
     } else {
         hideAutocomplete(autocomplete);
     }
@@ -340,6 +342,7 @@ document.addEventListener('DOMContentLoaded', function() {
     chatSubmit.addEventListener('click', e => submit(e.ctrlKey || e.metaKey));
 
     chatModelSelect.addEventListener('click', e => {
+        e.stopPropagation();
         chatModelSelect.classList.toggle('open');
         if (e.target instanceof HTMLElement && e.target.hasAttribute('data-value')) {
             let model = e.target.getAttribute('data-value');
@@ -348,6 +351,24 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
+    chatAutocomplete.addEventListener('click', e => {
+        e.stopPropagation();
+        if (e.target instanceof HTMLElement && e.target.classList.contains('option')) {
+            fillAutocomplete(chatInput, chatAutocomplete, e.target.textContent || "");
+        }
+    });
+    chatAutocomplete.addEventListener('mousemove', e => {
+        if (e.target instanceof HTMLElement && e.target.classList.contains('option')) {
+            for (let option of Array.from(chatAutocomplete.querySelectorAll('.option'))) {
+                option.classList.toggle('selected', option === e.target);
+            }
+        }
+    });
+
+    window.addEventListener('click', event => {
+        hideAutocomplete(chatAutocomplete);
+        chatModelSelect.classList.remove('open');
+    });
     window.addEventListener('message', event => {
         const message = event.data;
         if (message.command === 'clear') {
