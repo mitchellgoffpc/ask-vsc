@@ -19,6 +19,12 @@ type State = {
     text: string;
 };
 
+type Option = {
+    value: string;
+    display: string;
+    separator: string;
+};
+
 function getState(): State {
     return {
         chatMessages: [],
@@ -226,16 +232,20 @@ function updateChatInput(chatInput: HTMLTextAreaElement): void {
     autogrow(chatInput);
 }
 
-function showAutocomplete(textarea: HTMLTextAreaElement, autocomplete: HTMLElement, options: string[]): void {
+function showAutocomplete(textarea: HTMLTextAreaElement, autocomplete: HTMLElement, options: Option[] | string[]): void {
+    let optionsWithParams: Option[] = options.map((option: Option | string) =>
+        typeof option === "string" ? {value: option, display: option, separator: " "} : option);
     let tagStart = textarea.value.lastIndexOf(' ', textarea.selectionStart) + 1;
     let tagValue = textarea.value.substring(tagStart, textarea.selectionStart);
-    let validOptions = options.filter(option => option.startsWith(tagValue) && option !== tagValue);
+    let validOptions = optionsWithParams.filter(option => option.value.startsWith(tagValue) && option.value !== tagValue);
     if (validOptions.length) {
         autocomplete.style.display = "block";
         autocomplete.replaceChildren(...validOptions.map((option, i) =>
             createElement("div", {
                 className: i === 0 ? "option selected" : "option",
-            }, option)));
+                "data-value": option.value,
+                "data-separator": option.separator,
+            }, option.display)));
     } else {
         hideAutocomplete(autocomplete);
     }
@@ -245,17 +255,20 @@ function hideAutocomplete(autocomplete: HTMLElement): void {
     autocomplete.style.display = "none";
 }
 
-function fillAutocomplete(textarea: HTMLTextAreaElement, autocomplete: HTMLElement, value: string): void {
+function fillAutocomplete(textarea: HTMLTextAreaElement, autocomplete: HTMLElement, option: HTMLElement): void {
+    let value = option.getAttribute('data-value') || "";
+    let separator = option.getAttribute('data-separator') || " ";
     let tagStart = textarea.value.lastIndexOf(' ', textarea.selectionStart) + 1;
-    textarea.value = textarea.value.substring(0, tagStart) + value + ' ' + textarea.value.substring(textarea.selectionEnd);
+    textarea.value = textarea.value.substring(0, tagStart) + value + separator + textarea.value.substring(textarea.selectionEnd);
     handleAutocompleteInput(textarea, autocomplete);
+    autogrow(textarea);
 }
 
 
 // Event Handlers
 
 function handleAutocompleteKeypress(event: KeyboardEvent, textarea: HTMLTextAreaElement, autocomplete: HTMLElement): void {
-    let options = Array.from(autocomplete.querySelectorAll('.option'));
+    let options = Array.from(autocomplete.querySelectorAll('.option')) as HTMLElement[];
     let index = options.findIndex(option => option.classList.contains('selected'));
     let isUpKey = event.key === 'ArrowUp' || (event.key === 'p' && event.ctrlKey);
     let isDownKey = event.key === 'ArrowDown' || (event.key === 'n' && event.ctrlKey);
@@ -265,7 +278,7 @@ function handleAutocompleteKeypress(event: KeyboardEvent, textarea: HTMLTextArea
         hideAutocomplete(autocomplete);
     } else if (event.key === 'Enter' || event.key === 'Tab' || event.key === 'ArrowRight' || (event.key === 'e' && event.ctrlKey)) {
         event.preventDefault();
-        fillAutocomplete(textarea, autocomplete, options[index].textContent || "");
+        fillAutocomplete(textarea, autocomplete, options[index]);
     } else  if (isUpKey || isDownKey) {
         event.preventDefault();
         let nextIndex = isDownKey
@@ -284,8 +297,13 @@ async function handleAutocompleteInput(textarea: HTMLTextAreaElement, autocomple
         let tabNames = await sendMessage({ command: 'gettabs' });
         showAutocomplete(textarea, autocomplete, tabNames);
     } else if (tagValue.startsWith('file ') && tagValue.indexOf(' ', 5) === -1) {
-        let fileNames = await sendMessage({ command: 'getfiles', value: tagValue.substring(5) });
-        showAutocomplete(textarea, autocomplete, fileNames);
+        let filePaths = await sendMessage({ command: 'getfiles', value: tagValue.substring(5) });
+        let options = filePaths.map(([path, isDir]: [string, boolean]) => ({
+            value: path,
+            display: path.split('/').pop() || path,
+            separator: isDir ? "/" : " "
+        }));
+        showAutocomplete(textarea, autocomplete, options);
     } else {
         hideAutocomplete(autocomplete);
     }
@@ -354,7 +372,7 @@ document.addEventListener('DOMContentLoaded', function() {
     chatAutocomplete.addEventListener('click', e => {
         e.stopPropagation();
         if (e.target instanceof HTMLElement && e.target.classList.contains('option')) {
-            fillAutocomplete(chatInput, chatAutocomplete, e.target.textContent || "");
+            fillAutocomplete(chatInput, chatAutocomplete, e.target);
         }
     });
     chatAutocomplete.addEventListener('mousemove', e => {

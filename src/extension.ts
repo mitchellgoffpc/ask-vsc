@@ -1,4 +1,5 @@
 import os from 'os';
+import path from 'path';
 import * as vscode from 'vscode';
 import * as Diff from 'diff';
 import { MODELS, Model } from './api/models';
@@ -15,7 +16,7 @@ const INSERT_PROMPT =
   "The code you write will be inserted in my code where it says 'TODO: WRITE CODE HERE'.";
 const POST_PROMPT = "Please remember to return just the code, with no additional context or explanations.";
 
-type Document = vscode.TextDocument | vscode.NotebookDocument | undefined;
+type Document = vscode.TextDocument | vscode.NotebookDocument;
 type Message = {
     type: "prompt" | "code";
     value: string | null;
@@ -97,17 +98,28 @@ function isValidTab(tabInput: unknown): tabInput is vscode.TabInputText | vscode
     return typeof tabInput !== 'undefined' && (tabInput instanceof vscode.TabInputText || tabInput instanceof vscode.TabInputNotebook);
 }
 
-async function openDocumentFromTab(tab: vscode.Tab): Promise<Document> {
+function resolveFileURI(filename: string): vscode.Uri {
+    let rootDir = path.parse(process.cwd()).root;
+    let workspaceDirs = vscode.workspace.workspaceFolders;
+    let fullPath = filename.startsWith(rootDir) ? filename :
+                   workspaceDirs                ? path.join(workspaceDirs[0].uri.path, filename) :
+                                                  path.join(os.homedir(), filename);
+    return vscode.Uri.file(fullPath);
+}
+
+async function openDocumentFromTab(tab: vscode.Tab): Promise<Document | undefined> {
     if (tab && tab.input instanceof vscode.TabInputText) {
         return await vscode.workspace.openTextDocument(tab.input.uri);
     } else if (tab && tab.input instanceof vscode.TabInputNotebook) {
         return await vscode.workspace.openNotebookDocument(tab.input.uri);
+    } else {
+        return undefined;
     }
 }
 
-function getBufferText(document: vscode.TextDocument, selection: vscode.Selection, addInsertionPoint: boolean = false): string {
+function getBufferText(document: vscode.TextDocument, selection: vscode.Selection | undefined, addInsertionPoint: boolean = false): string {
     const text = document.getText();
-    if (addInsertionPoint && selection.isEmpty) {
+    if (addInsertionPoint && selection && selection.isEmpty) {
         const offset = document.offsetAt(selection.active);
         return text.slice(0, offset) + "TODO: WRITE CODE HERE" + text.slice(offset);
     } else {
@@ -115,9 +127,9 @@ function getBufferText(document: vscode.TextDocument, selection: vscode.Selectio
     }
 }
 
-function getCellText(cell: vscode.NotebookCell, editor: vscode.TextEditor, addInsertionPoint: boolean): string {
-    const cellIsActive = cell.document === editor.document;
-    const cellText = getBufferText(cell.document, editor.selection, cellIsActive && addInsertionPoint);
+function getCellText(cell: vscode.NotebookCell, editor: vscode.TextEditor | undefined, addInsertionPoint: boolean): string {
+    const cellIsActive = cell.document === editor?.document;
+    const cellText = getBufferText(cell.document, editor?.selection, cellIsActive && addInsertionPoint);
     if (cell.kind === vscode.NotebookCellKind.Markup) {
         return `"""\n${cellText}\n"""`;  // TODO: Make this work for non-python code
     } else {
@@ -125,25 +137,25 @@ function getCellText(cell: vscode.NotebookCell, editor: vscode.TextEditor, addIn
     }
 }
 
-function getDocumentText(document: Document, editor: vscode.TextEditor, addInsertionPoint: boolean = false): string {
+function getDocumentText(document: Document, editor: vscode.TextEditor | undefined, addInsertionPoint: boolean = false): string {
     if (isNotebookDocument(document)) {
         return document.getCells().map(cell => getCellText(cell, editor, addInsertionPoint)).join("\n\n");
     } else {
-        return getBufferText(editor.document, editor.selection, addInsertionPoint);
+        return getBufferText(document, editor?.selection, addInsertionPoint);
     }
 }
 
-async function getCodeMessages(question: string, activeDocument: Document, editor: vscode.TextEditor, addInsertionPoint: boolean = false): Promise<Message[]> {
+async function getCodeMessages(question: string, activeDocument: Document | undefined, editor: vscode.TextEditor | undefined, addInsertionPoint: boolean = false): Promise<Message[]> {
     let tabs = vscode.window.tabGroups.all.flatMap(group => group.tabs);
     let tags = question.match(/@workspace\b|@tab\s+\S+|@file\s+\S+/g) || [];
-    let documents: Map<string, Document> = new Map();
+    let documents: Map<string, Document | undefined> = new Map();
     if (activeDocument) {
         documents.set(activeDocument.uri.path, activeDocument);
     }
 
     for (let tag of tags) {
         if (tag.startsWith("@file")) {
-            let uri = vscode.Uri.file(tag.split(/\s+/)[1]);
+            let uri = resolveFileURI(tag.split(/\s+/)[1]);
             documents.set(uri.path, await vscode.workspace.openTextDocument(uri));
         } else if (tag.startsWith("@tab")) {
             let tab = tabs.find(tab => tab.label === tag.split(/\s+/)[1]);
@@ -159,12 +171,19 @@ async function getCodeMessages(question: string, activeDocument: Document, edito
         }
     }
 
-    return Array.from(documents.entries()).map(([path, document]) =>
-        ({ type: "code", name: path, value: getDocumentText(document, editor, addInsertionPoint) }));
+    let messages: Message[] = [];
+    for (let [path, document] of documents) {
+        if (document) {
+            messages.push({ type: "code", name: path, value: getDocumentText(document, editor, addInsertionPoint) });
+        }
+    }
+    return messages;
 }
 
-function getSelectedText(editor: vscode.TextEditor): [vscode.Range, string | null] {
-    if (editor.selection.isEmpty) {
+function getSelectedText(editor: vscode.TextEditor | undefined): [vscode.Range, string | null] {
+    if (!editor) {
+        return [new vscode.Range(0, 0, 0, 0), null];
+    } else if (editor.selection.isEmpty) {
         return [editor.document.lineAt(editor.selection.active.line).range, null];
     } else {
         const startLine = editor.document.lineAt(editor.selection.start.line);
@@ -196,7 +215,7 @@ function createPrompt(messages: Message[]): string {
 async function* ask(question: string, model: Model, controller: AbortController): AsyncIterable<string> {
     const activeEditor = vscode.window.activeTextEditor;
     const activeDocument = vscode.window.activeNotebookEditor?.notebook || activeEditor?.document;
-    if (question && activeEditor) {
+    if (question) {
         const [_, selectedText] = getSelectedText(activeEditor);
         const prompt = createPrompt([
             { type: "prompt", value: CODE_PROMPT },
@@ -213,7 +232,7 @@ async function* ask(question: string, model: Model, controller: AbortController)
 
 async function* modify(question: string, model: Model, controller: AbortController): AsyncIterable<Diff.Change[]> {
     const activeEditor = vscode.window.activeTextEditor;
-    const activeDocument: Document = vscode.window.activeNotebookEditor?.notebook || activeEditor?.document;
+    const activeDocument = vscode.window.activeNotebookEditor?.notebook || activeEditor?.document;
     if (question && activeEditor) {
         const [selectedRange, selectedText] = getSelectedText(activeEditor);
         const indentationLevel = selectedText ? getIndentationLevel(selectedText) : activeEditor.selection.start.character;
@@ -301,16 +320,15 @@ class ChatViewProvider implements vscode.WebviewViewProvider {
             const tabNames = tabGroups.flatMap(group => group.tabs.map(tab => tab.label));
             this.view?.webview.postMessage({ command: 'gettabs', value: tabNames });
         } else if (data.command === "getfiles") {
-            let rootDirs = vscode.workspace.workspaceFolders;
-            let prefix = data.value.slice(0, data.value.lastIndexOf('/') + 1);
-            let path = data.value.startsWith('/') ? prefix :
-                       rootDirs                   ? `${rootDirs[0].uri.path}/${prefix}` :
-                                                    `${os.homedir()}/${prefix}`;
-            let uri = vscode.Uri.file(path);
+            let prefix = data.value.slice(0, data.value.lastIndexOf(path.sep) + 1);
+            let uri = resolveFileURI(prefix);
             try {
                 await vscode.workspace.fs.stat(uri);  // Stat first to check if the file exists
                 const files = await vscode.workspace.fs.readDirectory(uri);
-                this.view?.webview.postMessage({ command: 'getfiles', value: files.map(x => x[0]).filter(x => !x.startsWith('.')) });
+                const filePaths = files
+                    .filter(x => !x[0].startsWith('.'))
+                    .map(([filename, type]) => [`${prefix}${filename}`, type === vscode.FileType.Directory]);
+                this.view?.webview.postMessage({ command: 'getfiles', value: filePaths });
             } catch (error) {
                 this.view?.webview.postMessage({ command: 'getfiles', value: [] });
             }
