@@ -11,15 +11,17 @@ export function resolveFileURI(filename: string): vscode.Uri {
     return vscode.Uri.file(fullPath);
 }
 
-export function getSelectedText(editor: vscode.TextEditor | undefined): [vscode.Range, string | null] {
-    if (!editor) {
-        return [new vscode.Range(0, 0, 0, 0), null];
-    } else if (editor.selection.isEmpty) {
-        return [editor.document.lineAt(editor.selection.active.line).range, null];
-    } else {
-        const startLine = editor.document.lineAt(editor.selection.start.line);
-        const endLine = editor.document.lineAt(editor.selection.end.line);
-        const selectionRange = new vscode.Range(startLine.range.start, endLine.range.end);
-        return [selectionRange, editor.document.getText(selectionRange)];
+export function getSelectedText(editor: vscode.TextEditor | undefined): string | null {
+    return editor && !editor.selection.isEmpty
+      ? editor.document.getText(editor.selection)
+      : null;
+}
+
+export function getNonce() {
+    let text = '';
+    const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+    for (let i = 0; i < 32; i++) {
+        text += possible.charAt(Math.floor(Math.random() * possible.length));
     }
+    return text;
 }

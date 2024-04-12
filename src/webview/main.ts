@@ -140,27 +140,48 @@ function renderMarkdownOrderedList(lines: string[]): [HTMLElement, number] {
     return [list, lineCount];
 }
 
-function renderMarkdownCode(lines: string[]): [HTMLElement, number] {
-    let codeBlock = document.createElement('pre');
+function renderMarkdownCodeLine(line: string, lang: string): HTMLElement {
+    let span = document.createElement('span');
+    let diffMatch = line.match(/^([\+\-\s])(.+)/);
+    if (lang === 'diff' && diffMatch) {
+        span.textContent = diffMatch[2] + '\n';
+        span.className = diffMatch[1] === '+' ? 'add' :
+                         diffMatch[1] === '-' ? 'remove' :
+                                                '';
+    } else {
+        span.textContent = line + '\n';
+    }
+    return span;
+}
+
+function renderMarkdownCode(lines: string[], lang: string): [HTMLElement, number] {
+    let lineElements = [];
     let lineCount = 0;
     for (let line of lines) {
         if (line.match(/^\s*```/)) { break; }
-        codeBlock.appendChild(createElement('div', {}, line));
+        lineElements.push(renderMarkdownCodeLine(line, lang));
         lineCount++;
     }
+    let codeBlock = createElement('div', {className: 'code'}, [
+        createElement('pre', {lang: lang}, lineElements)]);
+
     return [codeBlock, lineCount];
 }
 
 function renderMarkdown(input: string): HTMLElement {
     let div = document.createElement('div');
     let lines = input.split('\n');
+    let diff = false;
     let i = 0;
 
     while (i < lines.length) {
-        if (lines[i].match(/^\s*```/)) {
-            const [codeBlock, codeLineCount] = renderMarkdownCode(lines.slice(i + 1));
+        let code_match = lines[i].match(/^\s*```([a-zA-Z0-9]+)/);
+        if (code_match) {
+            let lang = code_match[1];
+            const [codeBlock, codeLineCount] = renderMarkdownCode(lines.slice(i + 1), lang);
             div.appendChild(codeBlock);
             i += codeLineCount + 2;
+            diff = diff || lang === 'diff';
         } else if (lines[i].startsWith('- ')) {
             const [list, listLineCount] = renderMarkdownUnorderedList(lines.slice(i));
             div.appendChild(list);
@@ -175,46 +196,19 @@ function renderMarkdown(input: string): HTMLElement {
         }
     }
 
+    // if (diff) {
+    //     div.appendChild(createElement('button', {className: 'approve', onClick: () => {
+    //         vscode.postMessage({ command: 'approve', diff: message.diff });
+    //     }}, "Approve"));
+    // }
+
     return div;
-}
-
-function getDiffChangeClass(change: Diff.Change): string | null {
-    return change.added   ? 'add' :
-           change.removed ? 'remove' :
-                            null;
-}
-
-function formatDiffLine(line: string, change: Diff.Change): string {
-    return change.added   ? `+${line}` :
-           change.removed ? `-${line}` :
-                            ` ${line}`;
-}
-
-function formatDiffChange(change: Diff.Change): string {
-    let lines = change.value.replace(/\n$/, '').split('\n');
-    let formattedLines = lines.map(line => formatDiffLine(line, change));
-    return formattedLines.join('\n') + '\n';
-}
-
-function renderDiff(message: any): HTMLElement[] {
-    return [
-        createElement('div', {className: 'code'}, [
-            createElement('pre', {lang: 'diff'}, message.diff.map((change: Diff.Change) =>
-                createElement('span', {className: getDiffChangeClass(change)}, formatDiffChange(change))))
-        ]),
-        message.unfinished
-          ? createElement('div', {}, '')
-          : createElement('button', {className: 'approve', onClick: () => {
-                vscode.postMessage({ command: 'approve', diff: message.diff });
-            }}, "Approve")
-    ];
 }
 
 function renderMessage(message: any): HTMLElement {
     return createElement('div', {className: 'message'}, [
         createElement('div', {className: 'header'}, ROLE_NAMES[message.role]),
-        createElement('div', {className: 'body'},
-            message.diff ? renderDiff(message) : [renderMarkdown(message.value)])]);
+        createElement('div', {className: 'body'}, [renderMarkdown(message.value)])]);
 }
 
 function updateChatOutput(chatOutput: HTMLElement): void {
@@ -399,10 +393,7 @@ document.addEventListener('DOMContentLoaded', function() {
             updateState(state => ({...state, chatMessages: [...state.chatMessages.slice(0, -1), message]}));
             let lastMessage = chatOutput.querySelector('.messages > .message:last-child');
             let body = lastMessage?.querySelector('.body');
-            let newBody = message.diff
-              ? renderDiff({...message, unfinished: true})
-              : [renderMarkdown(message.value)];
-            body?.replaceChildren(...newBody);
+            body?.replaceChildren(renderMarkdown(message.value));
         } else if (message.command === 'message-done') {
             updateChatOutput(chatOutput);
         } else if (message.command === 'focus') {

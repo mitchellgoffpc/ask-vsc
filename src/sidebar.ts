@@ -3,18 +3,9 @@ import * as vscode from 'vscode';
 import * as Diff from 'diff';
 import { MODELS, Model } from './api/models';
 import { APIKeyError, APIResponseError } from './api/query';
-import { resolveFileURI, getSelectedText } from './helpers';
-import { ask, modify } from './prompt';
+import { resolveFileURI, getNonce } from './helpers';
+import { ask } from './query';
 
-
-function getNonce() {
-    let text = '';
-    const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-    for (let i = 0; i < 32; i++) {
-        text += possible.charAt(Math.floor(Math.random() * possible.length));
-    }
-    return text;
-}
 
 export default class ChatViewProvider implements vscode.WebviewViewProvider {
     private view?: vscode.WebviewView;
@@ -43,7 +34,7 @@ export default class ChatViewProvider implements vscode.WebviewViewProvider {
 
     handleMessage = async (data: any) => {
         if (data.command === 'submit') {
-            await this.handleSubmit(data.value, data.isModification);
+            await this.handleSubmit(data.value);
         } else if (data.command === "approve") {
             await this.handleApproveDiff(data.diff);
         } else if (data.command === "model") {
@@ -72,20 +63,14 @@ export default class ChatViewProvider implements vscode.WebviewViewProvider {
         }
     };
 
-    async handleSubmit(message: string, isModification: boolean) {
+    async handleSubmit(message: string) {
         try {
             this.abortRequest();
             this.view?.webview.postMessage({ command: 'clear' });
             this.view?.webview.postMessage({ command: 'message', role: "user", value: message });
             this.view?.webview.postMessage({ command: 'message', role: "agent", value: "" });
-            if (isModification) {
-                for await (let update of modify(message, this.getModel(), this.controller)) {
-                    this.view?.webview.postMessage({ command: 'message-update', role: "agent", diff: update });
-                }
-            } else {
-                for await (let update of ask(message, this.getModel(), this.controller)) {
-                    this.view?.webview.postMessage({ command: 'message-update', role: "agent", value: update });
-                }
+            for await (let update of ask(message, this.getModel(), this.controller)) {
+                this.view?.webview.postMessage({ command: 'message-update', role: "agent", value: update });
             }
             this.view?.webview.postMessage({ command: 'message-done' });
         } catch (error: any) {
@@ -107,14 +92,14 @@ export default class ChatViewProvider implements vscode.WebviewViewProvider {
         this.view?.webview.postMessage({ command: 'clear' });
         let activeEditor = vscode.window.activeTextEditor;
         if (activeEditor) {
-            let [selectedRange, _] = getSelectedText(activeEditor);
-            let replacement = diff
-                .filter((change: Diff.Change) => !change.removed)
-                .map((change: Diff.Change) => change.value)
-                .join('');
-            activeEditor.edit(editBuilder => {
-                editBuilder.replace(selectedRange, replacement);
-            });
+            // let [selectedRange, _] = getSelectedText(activeEditor);
+            // let replacement = diff
+            //     .filter((change: Diff.Change) => !change.removed)
+            //     .map((change: Diff.Change) => change.value)
+            //     .join('');
+            // activeEditor.edit(editBuilder => {
+            //     editBuilder.replace(selectedRange, replacement);
+            // });
             vscode.window.showTextDocument(activeEditor.document, activeEditor.viewColumn);
         }
     }

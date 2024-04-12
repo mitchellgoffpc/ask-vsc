@@ -3,17 +3,7 @@ import * as Diff from 'diff';
 import { Model } from './api/models';
 import { query } from './api/query';
 import { getSelectedText, resolveFileURI } from './helpers';
-
-const SYSTEM_PROMPT =
-  "You are CodeGPT, a world-class AI designed to help write and debug code. " +
-  "Whenever you are asked to write code, you should return only the code, " +
-  "with no additional context or messages.";
-const CODE_PROMPT =
-  "The following is some code that I'm currently working on. " +
-  "It may be relevant to help answer my questions.";
-const INSERT_PROMPT =
-  "The code you write will be inserted in my code where it says 'TODO: WRITE CODE HERE'.";
-const POST_PROMPT = "Please remember to return just the code, with no additional context or explanations.";
+import { SYSTEM_PROMPT, EDITING_RULES_PROMPT, CODE_PROMPT } from './prompts';
 
 type Document = vscode.TextDocument | vscode.NotebookDocument;
 type Message = {
@@ -30,60 +20,6 @@ async function* accumulate(iterable: AsyncIterable<string>): AsyncIterable<strin
     for await (let value of iterable) {
         result += value;
         yield result;
-    }
-}
-
-async function* lines(iterable: AsyncIterable<string>): AsyncIterable<string> {
-    let currentLine = "";
-    for await (let value of iterable) {
-        currentLine += value;
-        if (currentLine.includes('\n')) {
-            let lines = currentLine.split('\n');
-            for (let line of lines.slice(0, -1)) {
-                yield line + '\n';
-            }
-            currentLine = lines[lines.length - 1];
-        }
-    }
-    if (currentLine) {
-        yield currentLine;
-    }
-}
-
-async function* removeBackticks(iterable: AsyncIterable<string>): AsyncIterable<string> {
-    let inBackticks = null;
-    for await (let value of iterable) {
-        if (inBackticks === null && value.startsWith('```')) {  // First line
-            inBackticks = true;
-        } else if (inBackticks === null) {
-            inBackticks = false;
-            yield value;
-        } else if (inBackticks && value.startsWith('```')) {
-            break;
-        } else {
-            yield value;
-        }
-    }
-}
-
-function addTrailingNewline(text: string): string {
-    return text.endsWith('\n') ? text : text + '\n';
-}
-
-function getIndentationLevel(text: string): number {
-    const lines = text.split('\n');
-    const indentations = lines.map(line => line.search(/\S/))
-                              .filter(indent => indent !== -1);
-    return indentations.length ? Math.min(...indentations) : 0;
-}
-
-function applyIndentationLevel(text: string, indentationLevel: number): string {
-    const currentIndentationLevel = getIndentationLevel(text);
-    if (currentIndentationLevel >= indentationLevel) {
-        return text;
-    } else {
-        const indentation = " ".repeat(indentationLevel - currentIndentationLevel);
-        return text.split('\n').map(line => indentation + line).join('\n');
     }
 }
 
@@ -193,55 +129,23 @@ export async function* ask(question: string, model: Model, controller: AbortCont
     const activeEditor = vscode.window.activeTextEditor;
     const activeDocument = vscode.window.activeNotebookEditor?.notebook || activeEditor?.document;
     if (question) {
-        const [_, selectedText] = getSelectedText(activeEditor);
-        const prompt = createPrompt([
-            { type: "prompt", value: CODE_PROMPT },
-            ...await getCodeMessages(question, activeDocument, activeEditor),
-            { type: "prompt", value: "Now, please answer the following question:" },
-            { type: "code",   value: selectedText },
-            { type: "prompt", value: removeTags(question) }
-        ]);
-        yield* accumulate(query(prompt, model, controller));
-    } else {
-        yield "";
-    }
-}
-
-export async function* modify(question: string, model: Model, controller: AbortController): AsyncIterable<Diff.Change[]> {
-    const activeEditor = vscode.window.activeTextEditor;
-    const activeDocument = vscode.window.activeNotebookEditor?.notebook || activeEditor?.document;
-    if (question && activeEditor) {
-        const [selectedRange, selectedText] = getSelectedText(activeEditor);
-        const indentationLevel = selectedText ? getIndentationLevel(selectedText) : activeEditor.selection.start.character;
+        const selectedText = getSelectedText(activeEditor);
 
         const commonMessages: Message[] = [
             { type: "prompt", value: SYSTEM_PROMPT },
+            { type: "prompt", value: EDITING_RULES_PROMPT },
             { type: "prompt", value: CODE_PROMPT },
             ...await getCodeMessages(question, activeDocument, activeEditor, true),
         ];
         const actionMessages: Message[] = selectedText ? [
-            { type: "prompt", value: "Your task is to modify the following code (and ONLY the following code) as described below:" },
-            { type: "code",   value: selectedText },
-            { type: "prompt", value: `${removeTags(question)} ${POST_PROMPT}` }
-        ] : [
-            { type: "prompt", value: "Your task is as follows:" },
-            { type: "prompt", value: `${removeTags(question)} ${INSERT_PROMPT} ${POST_PROMPT}` }
-        ];
+            { type: "prompt", value: "The following is the code I have currently selected." },
+            { type: "code",   value: selectedText }
+        ] : [];
+        const questionMessages: Message[] = [{ type: "prompt", value: removeTags(question) }];
+        const prompt = createPrompt([...commonMessages, ...actionMessages, ...questionMessages]);
 
-        const prompt = createPrompt([...commonMessages, ...actionMessages]);
-
-        let finalDiff: Diff.Change[] = [];
-        for await (let update of accumulate(removeBackticks(lines(query(prompt, model, controller))))) {
-            update = applyIndentationLevel(update, indentationLevel);
-            let diff = Diff.diffLines(addTrailingNewline(selectedText || ""), addTrailingNewline(update));
-            finalDiff = diff.slice();
-            while (diff.length && diff[diff.length - 1].removed) {
-                diff.pop();  // Don't show trailing removed lines until the end
-            }
-            yield diff;
+        for await (let update of accumulate(query(prompt, model, controller))) {
+            yield update;
         }
-        yield finalDiff;
-    } else {
-        yield [];
     }
 }
