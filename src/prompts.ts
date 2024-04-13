@@ -1,3 +1,5 @@
+// prompts from https://github.com/paul-gauthier/aider/blob/main/aider/coders/udiff_prompts.py
+
 export const SYSTEM_PROMPT = `
 Act as an expert software developer.
 You are diligent and tireless!

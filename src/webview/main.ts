@@ -74,7 +74,7 @@ function getCursorLine(textarea: HTMLTextAreaElement, fromEnd: boolean = false):
 }
 
 function createElement(tag: string, attributes: any, children: HTMLElement[] | string): HTMLElement {
-    const element = document.createElement(tag);
+    let element = document.createElement(tag);
 
     for (let key in attributes) {
         if (key === 'style') {
@@ -103,8 +103,12 @@ function createElement(tag: string, attributes: any, children: HTMLElement[] | s
 
 // Rendering
 
+function getDiffClass(indicator: string): string {
+    return indicator === '+' ? 'add' : indicator === '-' ? 'remove' : '';
+}
+
 function renderMarkdownLine(tag: string, line: string): HTMLElement {
-    const span = document.createElement(tag);
+    let span = document.createElement(tag);
     let formattedLine = line
         .replace(/(\*\*\*([^\*]+)\*\*\*)/g, '<b><i>$2</i></b>')
         .replace(/(\*\*([^\*]+)\*\*)/g, '<b>$2</b>')
@@ -141,17 +145,9 @@ function renderMarkdownOrderedList(lines: string[]): [HTMLElement, number] {
 }
 
 function renderMarkdownCodeLine(line: string, lang: string): HTMLElement {
-    let span = document.createElement('span');
-    let diffMatch = line.match(/^([\+\-\s])(.+)/);
-    if (lang === 'diff' && diffMatch) {
-        span.textContent = diffMatch[2] + '\n';
-        span.className = diffMatch[1] === '+' ? 'add' :
-                         diffMatch[1] === '-' ? 'remove' :
-                                                '';
-    } else {
-        span.textContent = line + '\n';
-    }
-    return span;
+    let textContent = lang === 'diff' && line.match(/^(?![\+\-]{2,})([\+\-\s])/) ? line.substring(1) : line;
+    let className = lang === 'diff' ? getDiffClass(line[0]) : '';
+    return createElement('span', {className}, textContent + '\n');
 }
 
 function renderMarkdownCode(lines: string[], lang: string): [HTMLElement, number] {
@@ -171,23 +167,26 @@ function renderMarkdownCode(lines: string[], lang: string): [HTMLElement, number
 function renderMarkdown(input: string): HTMLElement {
     let div = document.createElement('div');
     let lines = input.split('\n');
-    let diff = false;
+    let diffs = [];
     let i = 0;
 
     while (i < lines.length) {
         let code_match = lines[i].match(/^\s*```([a-zA-Z0-9]+)/);
         if (code_match) {
             let lang = code_match[1];
-            const [codeBlock, codeLineCount] = renderMarkdownCode(lines.slice(i + 1), lang);
+            let [codeBlock, codeLineCount] = renderMarkdownCode(lines.slice(i + 1), lang);
+            let codeText = lines.slice(i + 1, i + codeLineCount + 1).join('\n');
             div.appendChild(codeBlock);
             i += codeLineCount + 2;
-            diff = diff || lang === 'diff';
+            if (lang === 'diff') {
+                diffs.push(codeText);
+            }
         } else if (lines[i].startsWith('- ')) {
-            const [list, listLineCount] = renderMarkdownUnorderedList(lines.slice(i));
+            let [list, listLineCount] = renderMarkdownUnorderedList(lines.slice(i));
             div.appendChild(list);
             i += listLineCount;
         } else if (lines[i].match(/^\d+\. /)) {
-            const [list, listLineCount] = renderMarkdownOrderedList(lines.slice(i));
+            let [list, listLineCount] = renderMarkdownOrderedList(lines.slice(i));
             div.appendChild(list);
             i += listLineCount;
         } else {
@@ -196,11 +195,11 @@ function renderMarkdown(input: string): HTMLElement {
         }
     }
 
-    // if (diff) {
-    //     div.appendChild(createElement('button', {className: 'approve', onClick: () => {
-    //         vscode.postMessage({ command: 'approve', diff: message.diff });
-    //     }}, "Approve"));
-    // }
+    if (diffs.length) {
+        div.appendChild(createElement('button', {className: 'approve', onClick: () => {
+            vscode.postMessage({ command: 'approve', diff: diffs.join('\n') });
+        }}, "Approve"));
+    }
 
     return div;
 }
@@ -382,7 +381,7 @@ document.addEventListener('DOMContentLoaded', function() {
         chatModelSelect.classList.remove('open');
     });
     window.addEventListener('message', event => {
-        const message = event.data;
+        let message = event.data;
         if (message.command === 'clear') {
             updateState(state => ({...state, chatMessages: []}));
             updateChatOutput(chatOutput);

@@ -1,11 +1,9 @@
 import * as vscode from 'vscode';
-import * as Diff from 'diff';
 import { Model } from './api/models';
 import { query } from './api/query';
-import { getSelectedText, resolveFileURI } from './helpers';
 import { SYSTEM_PROMPT, EDITING_RULES_PROMPT, CODE_PROMPT } from './prompts';
+import { Document, isNotebookDocument, isValidTab, openDocumentFromTab, getSelectedText, resolveFileURI } from './helpers';
 
-type Document = vscode.TextDocument | vscode.NotebookDocument;
 type Message = {
     type: "prompt" | "code";
     value: string | null;
@@ -23,39 +21,8 @@ async function* accumulate(iterable: AsyncIterable<string>): AsyncIterable<strin
     }
 }
 
-function isNotebookDocument(document: Document): document is vscode.NotebookDocument {
-    return typeof document !== 'undefined' && 'cellCount' in document;
-}
-function isTextDocument(document: Document): document is vscode.TextDocument {
-    return typeof document !== 'undefined' && 'lineCount' in document;
-}
-function isValidTab(tabInput: unknown): tabInput is vscode.TabInputText | vscode.TabInputNotebook {
-    return typeof tabInput !== 'undefined' && (tabInput instanceof vscode.TabInputText || tabInput instanceof vscode.TabInputNotebook);
-}
-
-async function openDocumentFromTab(tab: vscode.Tab): Promise<Document | undefined> {
-    if (tab && tab.input instanceof vscode.TabInputText) {
-        return await vscode.workspace.openTextDocument(tab.input.uri);
-    } else if (tab && tab.input instanceof vscode.TabInputNotebook) {
-        return await vscode.workspace.openNotebookDocument(tab.input.uri);
-    } else {
-        return undefined;
-    }
-}
-
-function getBufferText(document: vscode.TextDocument, selection: vscode.Selection | undefined, addInsertionPoint: boolean = false): string {
-    const text = document.getText();
-    if (addInsertionPoint && selection && selection.isEmpty) {
-        const offset = document.offsetAt(selection.active);
-        return text.slice(0, offset) + "TODO: WRITE CODE HERE" + text.slice(offset);
-    } else {
-        return text;
-    }
-}
-
-function getCellText(cell: vscode.NotebookCell, editor: vscode.TextEditor | undefined, addInsertionPoint: boolean): string {
-    const cellIsActive = cell.document === editor?.document;
-    const cellText = getBufferText(cell.document, editor?.selection, cellIsActive && addInsertionPoint);
+function getCellText(cell: vscode.NotebookCell, editor: vscode.TextEditor | undefined): string {
+    const cellText = cell.document.getText();
     if (cell.kind === vscode.NotebookCellKind.Markup) {
         return `"""\n${cellText}\n"""`;  // TODO: Make this work for non-python code
     } else {
@@ -63,15 +30,15 @@ function getCellText(cell: vscode.NotebookCell, editor: vscode.TextEditor | unde
     }
 }
 
-function getDocumentText(document: Document, editor: vscode.TextEditor | undefined, addInsertionPoint: boolean = false): string {
+function getDocumentText(document: Document, editor: vscode.TextEditor | undefined): string[] {
     if (isNotebookDocument(document)) {
-        return document.getCells().map(cell => getCellText(cell, editor, addInsertionPoint)).join("\n\n");
+        return document.getCells().map(cell => getCellText(cell, editor));
     } else {
-        return getBufferText(document, editor?.selection, addInsertionPoint);
+        return [document.getText()];
     }
 }
 
-async function getCodeMessages(question: string, activeDocument: Document | undefined, editor: vscode.TextEditor | undefined, addInsertionPoint: boolean = false): Promise<Message[]> {
+async function getCodeMessages(question: string, activeDocument: Document | undefined, editor: vscode.TextEditor | undefined): Promise<Message[]> {
     let tabs = vscode.window.tabGroups.all.flatMap(group => group.tabs);
     let tags = question.match(/@workspace\b|@tab\s+\S+|@file\s+\S+/g) || [];
     let documents: Map<string, Document | undefined> = new Map();
@@ -100,7 +67,10 @@ async function getCodeMessages(question: string, activeDocument: Document | unde
     let messages: Message[] = [];
     for (let [path, document] of documents) {
         if (document) {
-            messages.push({ type: "code", name: path, value: getDocumentText(document, editor, addInsertionPoint) });
+            for (let [i, value] of getDocumentText(document, editor).entries()) {
+                let name = isNotebookDocument(document) ? `${path}, cell ${i + 1}` : path;
+                messages.push({ type: "code", name, value });
+            }
         }
     }
     return messages;
@@ -135,7 +105,7 @@ export async function* ask(question: string, model: Model, controller: AbortCont
             { type: "prompt", value: SYSTEM_PROMPT },
             { type: "prompt", value: EDITING_RULES_PROMPT },
             { type: "prompt", value: CODE_PROMPT },
-            ...await getCodeMessages(question, activeDocument, activeEditor, true),
+            ...await getCodeMessages(question, activeDocument, activeEditor),
         ];
         const actionMessages: Message[] = selectedText ? [
             { type: "prompt", value: "The following is the code I have currently selected." },

@@ -3,8 +3,9 @@ import * as vscode from 'vscode';
 import * as Diff from 'diff';
 import { MODELS, Model } from './api/models';
 import { APIKeyError, APIResponseError } from './api/query';
-import { resolveFileURI, getNonce } from './helpers';
+import { isNotebookDocument, isValidTab, resolveFileURI, getNonce, openDocumentFromTab } from './helpers';
 import { ask } from './query';
+import { start } from 'repl';
 
 
 export default class ChatViewProvider implements vscode.WebviewViewProvider {
@@ -88,19 +89,59 @@ export default class ChatViewProvider implements vscode.WebviewViewProvider {
         }
     }
 
-    async handleApproveDiff(diff: Diff.Change[]) {
-        this.view?.webview.postMessage({ command: 'clear' });
-        let activeEditor = vscode.window.activeTextEditor;
-        if (activeEditor) {
-            // let [selectedRange, _] = getSelectedText(activeEditor);
-            // let replacement = diff
-            //     .filter((change: Diff.Change) => !change.removed)
-            //     .map((change: Diff.Change) => change.value)
-            //     .join('');
-            // activeEditor.edit(editBuilder => {
-            //     editBuilder.replace(selectedRange, replacement);
-            // });
-            vscode.window.showTextDocument(activeEditor.document, activeEditor.viewColumn);
+    async handleApproveDiff(diff: string) {
+        const parsedDiff = Diff.parsePatch(diff);
+        const changes = parsedDiff.flatMap(file => {
+            let filename = file.oldFileName || "";
+            return file.hunks.map(hunk => {
+                let delimiters = hunk.linedelimiters || [];
+                let lines = hunk.lines.map((line, i) => ({line, delimiter: delimiters[i] || '\n'}));
+                let search = lines.filter(({line}) => line[0] !== '+').map(({line, delimiter}) => line.slice(1) + delimiter).join('');
+                let replace = lines.filter(({line}) => line[0] !== '-').map(({line, delimiter}) => line.slice(1) + delimiter).join('');
+                let searchTrailingNewlines = search.match(/\n*$/g) || [[]];
+                let replaceTrailingNewlines = replace.match(/\n*$/g) || [[]];
+                let newlines = Math.min(searchTrailingNewlines[0].length, replaceTrailingNewlines[0].length);
+                return {filename, search: search.slice(0, -newlines), replace: replace.slice(0, -newlines)};
+            });
+        });
+
+        let tabs = vscode.window.tabGroups.all.flatMap(group => group.tabs);
+        let tabsByFilePath: {[key: string]: vscode.Tab} = {};
+        for (let tab of tabs) {
+            if (isValidTab(tab.input)) {
+                tabsByFilePath[tab.input.uri.path] = tab;
+            }
+        }
+
+        for (let change of changes) {
+            let document = await openDocumentFromTab(tabsByFilePath[change.filename]);
+            if (document && change.search !== change.replace) {
+                if (isNotebookDocument(document)) {
+                    await vscode.window.showNotebookDocument(document);
+                } else {
+                    await vscode.window.showTextDocument(document);
+                }
+
+                let activeEditor = vscode.window.activeTextEditor;
+                if (!activeEditor) { continue; }
+
+                let text = activeEditor.document.getText();
+                let startIndex = [
+                    text.indexOf(change.search),
+                    text.indexOf(change.search.replace(/^\n+/g, '')),
+                    text.indexOf(change.search.replace(/\n+$/g, '')),
+                ].find(index => index !== -1);
+
+                if (typeof startIndex !== 'undefined') {
+                    const endIndex = startIndex + change.search.length;
+                    const start = activeEditor.document.positionAt(startIndex);
+                    const end = activeEditor.document.positionAt(endIndex);
+                    const range = new vscode.Range(start, end);
+                    activeEditor.edit(editBuilder => {
+                        editBuilder.replace(range, change.replace);
+                    });
+                }
+            }
         }
     }
 
