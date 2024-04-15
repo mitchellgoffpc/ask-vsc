@@ -167,7 +167,7 @@ function renderMarkdownCode(lines: string[], lang: string): [HTMLElement, number
 function renderMarkdown(input: string): HTMLElement {
     let div = document.createElement('div');
     let lines = input.split('\n');
-    let diffs = [];
+    let diffs: string[] = [];
     let i = 0;
 
     while (i < lines.length) {

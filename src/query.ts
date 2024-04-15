@@ -6,8 +6,9 @@ import { Document, isNotebookDocument, isValidTab, openDocumentFromTab, getSelec
 
 type Message = {
     type: "prompt" | "code";
-    value: string | null;
+    text: string | null;
     name?: string;
+    kind?: vscode.NotebookCellKind;
 };
 
 
@@ -21,24 +22,15 @@ async function* accumulate(iterable: AsyncIterable<string>): AsyncIterable<strin
     }
 }
 
-function getCellText(cell: vscode.NotebookCell, editor: vscode.TextEditor | undefined): string {
-    const cellText = cell.document.getText();
-    if (cell.kind === vscode.NotebookCellKind.Markup) {
-        return `"""\n${cellText}\n"""`;  // TODO: Make this work for non-python code
-    } else {
-        return cellText;
-    }
-}
-
-function getDocumentText(document: Document, editor: vscode.TextEditor | undefined): string[] {
+function getDocumentText(document: Document): { text: string; kind?: vscode.NotebookCellKind }[] {
     if (isNotebookDocument(document)) {
-        return document.getCells().map(cell => getCellText(cell, editor));
+        return document.getCells().map(cell => ({ text: cell.document.getText(), kind: cell.kind }));
     } else {
-        return [document.getText()];
+        return [{ text: document.getText() }];
     }
 }
 
-async function getCodeMessages(question: string, activeDocument: Document | undefined, editor: vscode.TextEditor | undefined): Promise<Message[]> {
+async function getCodeMessages(question: string, activeDocument: Document | undefined): Promise<Message[]> {
     let tabs = vscode.window.tabGroups.all.flatMap(group => group.tabs);
     let tags = question.match(/@workspace\b|@tab\s+\S+|@file\s+\S+/g) || [];
     let documents: Map<string, Document | undefined> = new Map();
@@ -65,11 +57,10 @@ async function getCodeMessages(question: string, activeDocument: Document | unde
     }
 
     let messages: Message[] = [];
-    for (let [path, document] of documents) {
+    for (let [name, document] of documents) {
         if (document) {
-            for (let [i, value] of getDocumentText(document, editor).entries()) {
-                let name = isNotebookDocument(document) ? `${path}, cell ${i + 1}` : path;
-                messages.push({ type: "code", name, value });
+            for (let [i, {text, kind}] of getDocumentText(document).entries()) {
+                messages.push({ type: "code", name: i === 0 ? name : undefined, kind, text });
             }
         }
     }
@@ -81,10 +72,17 @@ function removeTags(text: string): string {
 }
 
 function formatMessage(message: Message): string | null {
-    return message.value === null    ? null :
-           message.type === "prompt" ? message.value :
-           message.type === "code"   ? (message.name ? `${message.name}\n` : "") + "```\n" + message.value + "\n```" :
-                                       null;
+    if (message.text === null) {
+        return null;
+    } else if (message.type === "prompt") {
+        return message.text;
+    } else if (message.type === "code") {
+        let name = message.name ? `${message.name}\n` : "";
+        let cellType = message.kind === vscode.NotebookCellKind.Code ? "code" : "markdown";
+        return `${name}\`\`\`${cellType || ""}\n${message.text}\n\`\`\``;
+    } else {
+        return null;
+    }
 }
 
 function createPrompt(messages: Message[]): string {
@@ -102,16 +100,16 @@ export async function* ask(question: string, model: Model, controller: AbortCont
         const selectedText = getSelectedText(activeEditor);
 
         const commonMessages: Message[] = [
-            { type: "prompt", value: SYSTEM_PROMPT },
-            { type: "prompt", value: EDITING_RULES_PROMPT },
-            { type: "prompt", value: CODE_PROMPT },
-            ...await getCodeMessages(question, activeDocument, activeEditor),
+            { type: "prompt", text: SYSTEM_PROMPT },
+            { type: "prompt", text: EDITING_RULES_PROMPT },
+            { type: "prompt", text: CODE_PROMPT },
+            ...await getCodeMessages(question, activeDocument),
         ];
         const actionMessages: Message[] = selectedText ? [
-            { type: "prompt", value: "The following is the code I have currently selected." },
-            { type: "code",   value: selectedText }
+            { type: "prompt", text: "The following is the code I have currently selected." },
+            { type: "code",   text: selectedText }
         ] : [];
-        const questionMessages: Message[] = [{ type: "prompt", value: removeTags(question) }];
+        const questionMessages: Message[] = [{ type: "prompt", text: removeTags(question) }];
         const prompt = createPrompt([...commonMessages, ...actionMessages, ...questionMessages]);
 
         for await (let update of accumulate(query(prompt, model, controller))) {

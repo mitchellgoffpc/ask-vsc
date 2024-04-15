@@ -98,10 +98,10 @@ export default class ChatViewProvider implements vscode.WebviewViewProvider {
                 let lines = hunk.lines.map((line, i) => ({line, delimiter: delimiters[i] || '\n'}));
                 let search = lines.filter(({line}) => line[0] !== '+').map(({line, delimiter}) => line.slice(1) + delimiter).join('');
                 let replace = lines.filter(({line}) => line[0] !== '-').map(({line, delimiter}) => line.slice(1) + delimiter).join('');
-                let searchTrailingNewlines = search.match(/\n*$/g) || [[]];
-                let replaceTrailingNewlines = replace.match(/\n*$/g) || [[]];
-                let newlines = Math.min(searchTrailingNewlines[0].length, replaceTrailingNewlines[0].length);
-                return {filename, search: search.slice(0, -newlines), replace: replace.slice(0, -newlines)};
+                let searchTrailingNewlines = search.match(/\n*$/) || [[]];
+                let replaceTrailingNewlines = replace.match(/\n*$/) || [[]];
+                let endPos = -Math.min(searchTrailingNewlines[0].length, replaceTrailingNewlines[0].length) || undefined;
+                return {filename, search: search.slice(0, endPos), replace: replace.slice(0, endPos)};
             });
         });
 
@@ -115,7 +115,9 @@ export default class ChatViewProvider implements vscode.WebviewViewProvider {
 
         for (let change of changes) {
             let document = await openDocumentFromTab(tabsByFilePath[change.filename]);
-            if (document && change.search !== change.replace) {
+            if (!document) {
+                vscode.window.showErrorMessage(`Could not apply diff: file not found in workspace.`);
+            } else if (change.search !== change.replace) {
                 if (isNotebookDocument(document)) {
                     await vscode.window.showNotebookDocument(document);
                 } else {
@@ -132,7 +134,9 @@ export default class ChatViewProvider implements vscode.WebviewViewProvider {
                     text.indexOf(change.search.replace(/\n+$/g, '')),
                 ].find(index => index !== -1);
 
-                if (typeof startIndex !== 'undefined') {
+                if (typeof startIndex === 'undefined') {
+                    vscode.window.showErrorMessage("Could not apply diff: search text not found in document.");
+                } else {
                     const endIndex = startIndex + change.search.length;
                     const start = activeEditor.document.positionAt(startIndex);
                     const end = activeEditor.document.positionAt(endIndex);
