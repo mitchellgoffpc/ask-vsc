@@ -6,8 +6,8 @@ class API {
     headers(api_key: string): any {
         return {"Authorization": `Bearer ${api_key}`, "Content-Type": "application/json"};
     }
-    params(model_name: string, message: any, temperature: number = 0.7): any {
-        return {"model": model_name, "messages": message, "temperature": temperature, "max_tokens": 4096, "stream": true};
+    params(model_name: string, messages: any[], temperature: number = 0.7): any {
+        return {"model": model_name, "messages": messages, "temperature": temperature, "max_tokens": 4096, "stream": true};
     }
     result(line: any): string {
         assert.ok(line['choices'].length === 1, `Expected exactly one choice, but got ${line['choices'].length}!`);
@@ -18,6 +18,12 @@ class API {
 class AnthropicAPI extends API {
     headers(api_key: string): any {
         return {"x-api-key": api_key, 'anthropic-version': '2023-06-01', "Content-Type": "application/json"};
+    }
+    params(model_name: string, messages: any[], temperature: number = 0.7): any {
+        let systemMessages = messages.filter(msg => msg.role === 'system');
+        let userMessages = messages.filter(msg => msg.role === 'user');
+        let systemPrompt = systemMessages.map(msg => msg.content).join('\n\n') || undefined;
+        return {"model": model_name, "system": systemPrompt, "messages": userMessages, "temperature": temperature, "max_tokens": 4096, "stream": true};
     }
     result(response: any): string {
         return response.type === 'content_block_delta' ? response.delta.text : "";

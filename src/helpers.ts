@@ -39,6 +39,47 @@ export function resolveFileURI(filename: string): vscode.Uri {
     return vscode.Uri.file(fullPath);
 }
 
+export function getLocalPath(uriPath: string): string {
+    let workspaceDir = vscode.workspace.workspaceFolders?.[0]?.uri.path;
+    return workspaceDir && uriPath.startsWith(workspaceDir)
+      ? uriPath.slice(workspaceDir.length + 1)
+      : uriPath;
+}
+
+export async function fileExists(uri: vscode.Uri): Promise<boolean> {
+    try {
+        await vscode.workspace.fs.stat(uri);
+        return true;
+    } catch (error) {
+        return false;
+    }
+}
+
+export async function createFile(uri: vscode.Uri, content: string) {
+    if (!await fileExists(uri)) {
+        try {
+            await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(content));
+            await vscode.window.showTextDocument(uri);
+        } catch (error) {
+            vscode.window.showErrorMessage(`Could not create file: ${uri.path}. ${error}`);
+        }
+    } else {
+        vscode.window.showErrorMessage(`File already exists: ${uri.path}`);
+    }
+}
+
+export async function deleteFile(uri: vscode.Uri) {
+    if (await fileExists(uri)) {
+        try {
+            await vscode.workspace.fs.delete(uri);
+        } catch (error) {
+            vscode.window.showErrorMessage(`Could not delete file: ${uri.path}. ${error}`);
+        }
+    } else {
+        vscode.window.showErrorMessage(`File does not exist: ${uri.path}`);
+    }
+}
+
 export function getNonce() {
     let text = '';
     const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';

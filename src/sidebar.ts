@@ -3,9 +3,8 @@ import * as vscode from 'vscode';
 import * as Diff from 'diff';
 import { MODELS, Model } from './api/models';
 import { APIKeyError, APIResponseError } from './api/query';
-import { isNotebookDocument, isValidTab, resolveFileURI, getNonce, openDocumentFromTab } from './helpers';
+import { Document, isNotebookDocument, isValidTab, resolveFileURI, getNonce, openDocumentFromTab, createFile, deleteFile } from './helpers';
 import { ask } from './query';
-import { start } from 'repl';
 
 
 export default class ChatViewProvider implements vscode.WebviewViewProvider {
@@ -92,17 +91,22 @@ export default class ChatViewProvider implements vscode.WebviewViewProvider {
     async handleApproveDiff(diff: string) {
         const parsedDiff = Diff.parsePatch(diff);
         const changes = parsedDiff.flatMap(file => {
-            let filename = file.oldFileName || "";
-            return file.hunks.map(hunk => {
-                let delimiters = hunk.linedelimiters || [];
-                let lines = hunk.lines.map((line, i) => ({line, delimiter: delimiters[i] || '\n'}));
-                let search = lines.filter(({line}) => line[0] !== '+').map(({line, delimiter}) => line.slice(1) + delimiter).join('');
-                let replace = lines.filter(({line}) => line[0] !== '-').map(({line, delimiter}) => line.slice(1) + delimiter).join('');
-                let searchTrailingNewlines = search.match(/\n*$/) || [[]];
-                let replaceTrailingNewlines = replace.match(/\n*$/) || [[]];
-                let endPos = -Math.min(searchTrailingNewlines[0].length, replaceTrailingNewlines[0].length) || undefined;
-                return {filename, search: search.slice(0, endPos), replace: replace.slice(0, endPos)};
-            });
+            let oldFileURI = file.oldFileName ? resolveFileURI(file.oldFileName) : undefined;
+            let newFileURI = file.newFileName ? resolveFileURI(file.newFileName) : undefined;
+            if (file.hunks.length) {
+                return file.hunks.map(hunk => {
+                    let delimiters = hunk.linedelimiters || [];
+                    let lines = hunk.lines.map((line, i) => ({line, delimiter: delimiters[i] || '\n'}));
+                    let search = lines.filter(({line}) => line[0] !== '+').map(({line, delimiter}) => line.slice(1) + delimiter).join('');
+                    let replace = lines.filter(({line}) => line[0] !== '-').map(({line, delimiter}) => line.slice(1) + delimiter).join('');
+                    let searchTrailingNewlines = search.match(/\n*$/) || [[]];
+                    let replaceTrailingNewlines = replace.match(/\n*$/) || [[]];
+                    let endPos = -Math.min(searchTrailingNewlines[0].length, replaceTrailingNewlines[0].length) || undefined;
+                    return { oldFileURI, newFileURI, search: search.slice(0, endPos), replace: replace.slice(0, endPos) };
+                });
+            } else {
+                return [{ oldFileURI, newFileURI, search: '', replace: '' }];
+            }
         });
 
         let tabs = vscode.window.tabGroups.all.flatMap(group => group.tabs);
@@ -114,36 +118,44 @@ export default class ChatViewProvider implements vscode.WebviewViewProvider {
         }
 
         for (let change of changes) {
-            let document = await openDocumentFromTab(tabsByFilePath[change.filename]);
-            if (!document) {
-                vscode.window.showErrorMessage(`Could not apply diff: file not found in workspace.`);
-            } else if (change.search !== change.replace) {
-                if (isNotebookDocument(document)) {
-                    await vscode.window.showNotebookDocument(document);
-                } else {
-                    await vscode.window.showTextDocument(document);
-                }
+            if (!change.oldFileURI || !change.newFileURI) {
+                vscode.window.showErrorMessage(`Could not apply diff: missing file path.`);
+            } else if (change.oldFileURI.path === '/dev/null') {
+                createFile(change.newFileURI, change.replace);
+            } else if (change.newFileURI.path === '/dev/null') {
+                deleteFile(change.oldFileURI);
+            } else {
+                let document = await openDocumentFromTab(tabsByFilePath[change.newFileURI.path]);
+                if (!document) {
+                    vscode.window.showErrorMessage(`Could not apply diff: file not found in workspace.`);
+                } else if (change.search !== change.replace) {
+                    if (isNotebookDocument(document)) {
+                        await vscode.window.showNotebookDocument(document);
+                    } else {
+                        await vscode.window.showTextDocument(document);
+                    }
 
-                let activeEditor = vscode.window.activeTextEditor;
-                if (!activeEditor) { continue; }
+                    let activeEditor = vscode.window.activeTextEditor;
+                    if (!activeEditor) { continue; }
 
-                let text = activeEditor.document.getText();
-                let startIndex = [
-                    text.indexOf(change.search),
-                    text.indexOf(change.search.replace(/^\n+/g, '')),
-                    text.indexOf(change.search.replace(/\n+$/g, '')),
-                ].find(index => index !== -1);
+                    let text = activeEditor.document.getText();
+                    let startIndex = [
+                        text.indexOf(change.search),
+                        text.indexOf(change.search.replace(/^\n+/g, '')),
+                        text.indexOf(change.search.replace(/\n+$/g, '')),
+                    ].find(index => index !== -1);
 
-                if (typeof startIndex === 'undefined') {
-                    vscode.window.showErrorMessage("Could not apply diff: search text not found in document.");
-                } else {
-                    const endIndex = startIndex + change.search.length;
-                    const start = activeEditor.document.positionAt(startIndex);
-                    const end = activeEditor.document.positionAt(endIndex);
-                    const range = new vscode.Range(start, end);
-                    activeEditor.edit(editBuilder => {
-                        editBuilder.replace(range, change.replace);
-                    });
+                    if (typeof startIndex === 'undefined') {
+                        vscode.window.showErrorMessage("Could not apply diff: search text not found in document.");
+                    } else {
+                        const endIndex = startIndex + change.search.length;
+                        const start = activeEditor.document.positionAt(startIndex);
+                        const end = activeEditor.document.positionAt(endIndex);
+                        const range = new vscode.Range(start, end);
+                        activeEditor.edit(editBuilder => {
+                            editBuilder.replace(range, change.replace);
+                        });
+                    }
                 }
             }
         }

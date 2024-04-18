@@ -1,6 +1,6 @@
 // prompts from https://github.com/paul-gauthier/aider/blob/main/aider/coders/udiff_prompts.py
 
-export const SYSTEM_PROMPT = `
+export const SYSTEM = `
 Act as an expert software developer.
 You are diligent and tireless!
 You NEVER leave comments describing code without implementing it!
@@ -26,8 +26,8 @@ For each file that needs to be changed, write out the changes similar to a unifi
 Here are the diffs for those changes:
 
 \`\`\`diff
---- mathweb/flask/app.py
-+++ mathweb/flask/app.py
+--- app.py
++++ app.py
 @@ ... @@
 -class MathWeb:
 +import sympy
@@ -61,9 +61,9 @@ Here are the diffs for those changes:
 +            count += 1
 +    return str(num)
 \`\`\`
-`;
+`.trim();
 
-export const EDITING_RULES_PROMPT = `
+export const EDITING_RULES = `
 # File editing rules:
 
 Return edits similar to unified diffs that \`diff -U0\` would produce.
@@ -98,9 +98,19 @@ To move code within a file, use 2 hunks: 1 to delete it from its current locatio
 
 To make a new file, show a diff from \`--- /dev/null\` to \`+++ path/to/new/file.ext\`.
 
+To delete a file, show a diff from \`--- path/to/file.ext\` to \`+++ /dev/null\`. You don't need to include the contents of the file in the diff.
+
 You are diligent and tireless!
 You NEVER leave comments describing code without implementing it!
 You always COMPLETELY IMPLEMENT the needed code!
-`;
+`.trim();
 
-export const CODE_PROMPT = "The following is some code that I'm currently working on.";
+export const FILE_CONTENT = "These are the *read-write* files:";
+export const REPO_CONTENT = `
+Below here are summaries of other files present in this git repository.
+Do not propose changes to these files, they are *read-only*.
+To make a file *read-write*, ask the user to *add it to the chat*.
+`.trim();
+
+export const NO_FILES = "I am not sharing any *read-write* files yet.";
+export const NO_REPO = "I am not sharing any *read-only* files yet.";

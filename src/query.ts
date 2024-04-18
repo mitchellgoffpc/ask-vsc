@@ -1,8 +1,8 @@
 import * as vscode from 'vscode';
 import { Model } from './api/models';
 import { query } from './api/query';
-import { SYSTEM_PROMPT, EDITING_RULES_PROMPT, CODE_PROMPT } from './prompts';
-import { Document, isNotebookDocument, isValidTab, openDocumentFromTab, getSelectedText, resolveFileURI } from './helpers';
+import { Document, isNotebookDocument, isValidTab, openDocumentFromTab, getSelectedText, resolveFileURI, getLocalPath } from './helpers';
+import * as Prompts from './prompts';
 
 type Message = {
     type: "prompt" | "code";
@@ -57,10 +57,11 @@ async function getCodeMessages(question: string, activeDocument: Document | unde
     }
 
     let messages: Message[] = [];
-    for (let [name, document] of documents) {
+    for (let [path, document] of documents) {
         if (document) {
             for (let [i, {text, kind}] of getDocumentText(document).entries()) {
-                messages.push({ type: "code", name: i === 0 ? name : undefined, kind, text });
+                let name = i === 0 ? getLocalPath(path) : undefined;
+                messages.push({ type: "code", name, kind, text });
             }
         }
     }
@@ -78,8 +79,10 @@ function formatMessage(message: Message): string | null {
         return message.text;
     } else if (message.type === "code") {
         let name = message.name ? `${message.name}\n` : "";
-        let cellType = message.kind === vscode.NotebookCellKind.Code ? "code" : "markdown";
-        return `${name}\`\`\`${cellType || ""}\n${message.text}\n\`\`\``;
+        let cellType = message.kind === vscode.NotebookCellKind.Code   ? "code" :
+                       message.kind === vscode.NotebookCellKind.Markup ? "markdown" :
+                                                                         "";
+        return `${name}\`\`\`${cellType}\n${message.text}\n\`\`\``;
     } else {
         return null;
     }
@@ -99,18 +102,27 @@ export async function* ask(question: string, model: Model, controller: AbortCont
     if (question) {
         const selectedText = getSelectedText(activeEditor);
 
-        const commonMessages: Message[] = [
-            { type: "prompt", text: SYSTEM_PROMPT },
-            { type: "prompt", text: EDITING_RULES_PROMPT },
-            { type: "prompt", text: CODE_PROMPT },
+        const systemPrompt = createPrompt([
+            { type: "prompt", text: Prompts.SYSTEM },
+            { type: "prompt", text: Prompts.EDITING_RULES },
+        ]);
+        const userPrompt = createPrompt([
+            { type: "prompt", text: Prompts.NO_REPO },
+            { type: "prompt", text: Prompts.FILE_CONTENT },
             ...await getCodeMessages(question, activeDocument),
+            { type: "prompt", text: removeTags(question) },
+        ]);
+
+        console.log(userPrompt);
+
+        // const actionMessages: Message[] = selectedText ? [
+        //     { type: "prompt", text: "The following is the code I have currently selected." },
+        //     { type: "code",   text: selectedText }
+
+        const prompt = [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userPrompt }
         ];
-        const actionMessages: Message[] = selectedText ? [
-            { type: "prompt", text: "The following is the code I have currently selected." },
-            { type: "code",   text: selectedText }
-        ] : [];
-        const questionMessages: Message[] = [{ type: "prompt", text: removeTags(question) }];
-        const prompt = createPrompt([...commonMessages, ...actionMessages, ...questionMessages]);
 
         for await (let update of accumulate(query(prompt, model, controller))) {
             yield update;
