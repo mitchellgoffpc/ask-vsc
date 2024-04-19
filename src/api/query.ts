@@ -11,11 +11,7 @@ export type Message = {
     content: string;
 };
 
-export async function* query(prompt: string | Message[], model: Model, controller: AbortController): AsyncIterable<string> {
-    if (typeof prompt === "string") {
-        prompt = [{ role: "user", content: prompt }];
-    }
-
+export async function* query(prompt: Message[], model: Model, controller: AbortController): AsyncIterable<string> {
     const api = model.api;
     const apiKey = vscode.workspace.getConfiguration('ask').get<string>(`apiKeys.${api.key}`);
     const apiKeyName = api.key[0].toUpperCase() + api.key.slice(1);
