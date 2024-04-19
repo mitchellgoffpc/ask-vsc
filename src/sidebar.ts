@@ -3,29 +3,26 @@ import * as vscode from 'vscode';
 import * as Diff from 'diff';
 import { MODELS, Model } from './api/models';
 import { APIKeyError, APIResponseError } from './api/query';
-import { Document, isNotebookDocument, isValidTab, resolveFileURI, getNonce, openDocumentFromTab, createFile, deleteFile } from './helpers';
+import { Document, isNotebookDocument, isValidTab, resolveFileURI, getNonce, openDocumentFromTab, createFile, deleteFile, fileExists } from './helpers';
 import { ask } from './query';
+import { Store } from './store';
+
+const COMMANDS = ["/file", "/tab"];
 
 
 export default class ChatViewProvider implements vscode.WebviewViewProvider {
     private view?: vscode.WebviewView;
+    private store: Store;
     private controller: AbortController = new AbortController();
 
-    constructor(private context: vscode.ExtensionContext) { }
+    constructor(private context: vscode.ExtensionContext) {
+        this.store = new Store(context);
+    }
 
     ask = () => {
         vscode.commands.executeCommand('ask.chat-view.focus');
-        this.view?.webview.postMessage({ command: 'focus' });
+        this.view?.webview.postMessage({ action: 'focus' });
     };
-
-    getModel(): Model {
-        const modelID = this.context.workspaceState.get<string>('modelID');
-        return MODELS.find(model => model.id === modelID) || MODELS[0];
-    }
-    async setModel(modelName: string) {
-        const model = MODELS.find(model => model.name === modelName) || MODELS[0];
-        await this.context.workspaceState.update('modelID', model.id);
-    }
 
     abortRequest() {
         this.controller.abort();
@@ -33,19 +30,19 @@ export default class ChatViewProvider implements vscode.WebviewViewProvider {
     }
 
     handleMessage = async (data: any) => {
-        if (data.command === 'submit') {
+        if (data.action === 'submit') {
             await this.handleSubmit(data.value);
-        } else if (data.command === "approve") {
+        } else if (data.action === "approve") {
             await this.handleApproveDiff(data.diff);
-        } else if (data.command === "model") {
-            this.setModel(data.value);
-        } else if (data.command === "getstate") {
-            this.view?.webview.postMessage({ command: 'state', value: { model: this.getModel() }});
-        } else if (data.command === 'gettabs') {
+        } else if (data.action === "model") {
+            this.store.setModel(data.value);
+        } else if (data.action === "getstate") {
+            this.view?.webview.postMessage({ action: 'state', value: this.store.getState() });
+        } else if (data.action === 'gettabs') {
             const tabGroups = vscode.window.tabGroups.all;
             const tabNames = tabGroups.flatMap(group => group.tabs.map(tab => tab.label));
-            this.view?.webview.postMessage({ command: 'gettabs', value: tabNames });
-        } else if (data.command === "getfiles") {
+            this.view?.webview.postMessage({ action: 'gettabs', value: tabNames });
+        } else if (data.action === "getfiles") {
             let prefix = data.value.slice(0, data.value.lastIndexOf(path.sep) + 1);
             let uri = resolveFileURI(prefix);
             try {
@@ -54,25 +51,51 @@ export default class ChatViewProvider implements vscode.WebviewViewProvider {
                 const filePaths = files
                     .filter(x => !x[0].startsWith('.'))
                     .map(([filename, type]) => [`${prefix}${filename}`, type === vscode.FileType.Directory]);
-                this.view?.webview.postMessage({ command: 'getfiles', value: filePaths });
+                this.view?.webview.postMessage({ action: 'getfiles', value: filePaths });
             } catch (error) {
-                this.view?.webview.postMessage({ command: 'getfiles', value: [] });
+                this.view?.webview.postMessage({ action: 'getfiles', value: [] });
             }
-        } else if (data.command === "unfocus") {
+        } else if (data.action === "removefile") {
+            await this.store.removeFile(resolveFileURI(data.value));
+            this.view?.webview.postMessage({ action: 'state', value: this.store.getState() });
+        } else if (data.action === "unfocus") {
             vscode.commands.executeCommand('workbench.action.focusActiveEditorGroup');
+        } else if (data.action === "command") {
+            if (!COMMANDS.includes(data.command)) {
+                vscode.window.showErrorMessage(`Unknown command: ${data.command}`);
+            } else if (data.args.length === 0) {
+                vscode.window.showErrorMessage("Command '/file' requires a file path as an argument");
+            } else if (data.command === "/file") {
+                let uri = resolveFileURI(data.args[0]);
+                if (await fileExists(uri)) {
+                    await this.store.addFile(uri);
+                    this.view?.webview.postMessage({ action: 'state', value: this.store.getState() });
+                } else {
+                    vscode.window.showErrorMessage(`File not found: ${uri.path}`);
+                }
+            } else if (data.command === "/tab") {
+                let tabs = vscode.window.tabGroups.all.flatMap(group => group.tabs);
+                let tab = tabs.find(tab => tab.label === data.args[0]);
+                if (isValidTab(tab?.input)) {
+                    await this.store.addFile(tab.input.uri);
+                    this.view?.webview.postMessage({ action: 'state', value: this.store.getState() });
+                } else {
+                    vscode.window.showErrorMessage(`Tab not found: ${data.args[0]}`);
+                }
+            }
         }
     };
 
     async handleSubmit(message: string) {
         try {
             this.abortRequest();
-            this.view?.webview.postMessage({ command: 'clear' });
-            this.view?.webview.postMessage({ command: 'message', role: "user", value: message });
-            this.view?.webview.postMessage({ command: 'message', role: "agent", value: "" });
-            for await (let update of ask(message, this.getModel(), this.controller)) {
-                this.view?.webview.postMessage({ command: 'message-update', role: "agent", value: update });
+            this.view?.webview.postMessage({ action: 'clear' });
+            this.view?.webview.postMessage({ action: 'message', role: "user", value: message });
+            this.view?.webview.postMessage({ action: 'message', role: "agent", value: "" });
+            for await (let update of ask(message, this.store.getFiles(), this.store.getModel(), this.controller)) {
+                this.view?.webview.postMessage({ action: 'message-update', role: "agent", value: update });
             }
-            this.view?.webview.postMessage({ command: 'message-done' });
+            this.view?.webview.postMessage({ action: 'message-done' });
         } catch (error: any) {
             if (error instanceof APIKeyError) {
                 vscode.window.showErrorMessage(error.message, {}, {title: "Settings"}, {title: "Cancel"}).then(selection => {
@@ -123,6 +146,18 @@ export default class ChatViewProvider implements vscode.WebviewViewProvider {
             } else if (change.oldFileURI.path === '/dev/null') {
                 createFile(change.newFileURI, change.replace);
             } else if (change.newFileURI.path === '/dev/null') {
+                if (change.oldFileURI.path in tabsByFilePath) {
+                    let document = await openDocumentFromTab(tabsByFilePath[change.oldFileURI.path]);
+                    if (!document) {
+                        continue;
+                    }
+                    if (isNotebookDocument(document)) {
+                        await vscode.window.showNotebookDocument(document);
+                    } else {
+                        await vscode.window.showTextDocument(document);
+                    }
+                    await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
+                }
                 deleteFile(change.oldFileURI);
             } else {
                 let document = await openDocumentFromTab(tabsByFilePath[change.newFileURI.path]);
@@ -196,6 +231,7 @@ export default class ChatViewProvider implements vscode.WebviewViewProvider {
                     <link href="${codiconsUri}" rel="stylesheet">
                 </head>
                 <body>
+                    <div class="chat-files"></div>
                     <div class="chat-output"></div>
 
                     <div class="chat-input">

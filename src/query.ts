@@ -30,30 +30,13 @@ function getDocumentText(document: Document): { text: string; kind?: vscode.Note
     }
 }
 
-async function getCodeMessages(question: string, activeDocument: Document | undefined): Promise<Message[]> {
-    let tabs = vscode.window.tabGroups.all.flatMap(group => group.tabs);
-    let tags = question.match(/@workspace\b|@tab\s+\S+|@file\s+\S+/g) || [];
+async function getCodeMessages(activeDocument: Document | undefined, files: vscode.Uri[]): Promise<Message[]> {
     let documents: Map<string, Document | undefined> = new Map();
     if (activeDocument) {
         documents.set(activeDocument.uri.path, activeDocument);
     }
-
-    for (let tag of tags) {
-        if (tag.startsWith("@file")) {
-            let uri = resolveFileURI(tag.split(/\s+/)[1]);
-            documents.set(uri.path, await vscode.workspace.openTextDocument(uri));
-        } else if (tag.startsWith("@tab")) {
-            let tab = tabs.find(tab => tab.label === tag.split(/\s+/)[1]);
-            if (isValidTab(tab?.input)) {
-                documents.set(tab.input.uri.path, await openDocumentFromTab(tab));
-            }
-        } else if (tag.startsWith("@workspace")) {
-            for (let tab of tabs) {
-                if (isValidTab(tab?.input)) {
-                    documents.set(tab.input.uri.path, await openDocumentFromTab(tab));
-                }
-            }
-        }
+    for (let uri of files) {
+        documents.set(uri.path, await vscode.workspace.openTextDocument(uri));
     }
 
     let messages: Message[] = [];
@@ -66,10 +49,6 @@ async function getCodeMessages(question: string, activeDocument: Document | unde
         }
     }
     return messages;
-}
-
-function removeTags(text: string): string {
-    return text.replace(/@workspace\b|@tab\s+\S+|@file\s+\S+/g, "").trim();
 }
 
 function formatMessage(message: Message): string | null {
@@ -96,12 +75,10 @@ function createPrompt(messages: Message[]): string {
 
 // API functions
 
-export async function* ask(question: string, model: Model, controller: AbortController): AsyncIterable<string> {
+export async function* ask(question: string, files: vscode.Uri[], model: Model, controller: AbortController): AsyncIterable<string> {
     const activeEditor = vscode.window.activeTextEditor;
     const activeDocument = vscode.window.activeNotebookEditor?.notebook || activeEditor?.document;
     if (question) {
-        const selectedText = getSelectedText(activeEditor);
-
         const systemPrompt = createPrompt([
             { type: "prompt", text: Prompts.SYSTEM },
             { type: "prompt", text: Prompts.EDITING_RULES },
@@ -109,12 +86,12 @@ export async function* ask(question: string, model: Model, controller: AbortCont
         const userPrompt = createPrompt([
             { type: "prompt", text: Prompts.NO_REPO },
             { type: "prompt", text: Prompts.FILE_CONTENT },
-            ...await getCodeMessages(question, activeDocument),
-            { type: "prompt", text: removeTags(question) },
+            ...await getCodeMessages(activeDocument, files),
+            { type: "prompt", text: question },
         ]);
 
-        console.log(userPrompt);
-
+        // console.log(userPrompt);
+        // const selectedText = getSelectedText(activeEditor);
         // const actionMessages: Message[] = selectedText ? [
         //     { type: "prompt", text: "The following is the code I have currently selected." },
         //     { type: "code",   text: selectedText }
