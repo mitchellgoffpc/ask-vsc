@@ -70,7 +70,6 @@ export default function TextInput() {
             textarea.value = newText;
             setText(newText);
             handleAutocompleteInput();
-            autogrow(textarea);
         }
     }
 
@@ -110,9 +109,6 @@ export default function TextInput() {
         let textarea = event.target as HTMLTextAreaElement;
         setText(textarea.value);
         handleAutocompleteInput();
-        if (textAreaRef.current) {
-            autogrow(textAreaRef.current);
-        }
     }
 
     function handleAutocompleteClick(event: React.MouseEvent, option: Option) {
@@ -194,7 +190,7 @@ export default function TextInput() {
 
     useEffect(() => {
         if (textAreaRef.current) { autogrow(textAreaRef.current); }
-    }, [textAreaRef]);
+    }, [textAreaRef, text]);
 
     useEffect(() => {
         API.addEventListener("focus", handleFocusCommand);
