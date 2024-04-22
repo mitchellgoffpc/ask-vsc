@@ -1,5 +1,3 @@
-import * as assert from 'assert';
-
 class API {
     constructor(public url: string, public key: string) { }
 
@@ -10,7 +8,9 @@ class API {
         return {"model": model_name, "messages": messages, "temperature": temperature, "max_tokens": 4096, "stream": true};
     }
     result(line: any): string {
-        assert.ok(line['choices'].length === 1, `Expected exactly one choice, but got ${line['choices'].length}!`);
+        if (line['choices'].length !== 1) {
+            throw new Error(`Expected exactly one choice, but got ${line['choices'].length}!`);
+        }
         return line.choices[0].delta.content || "";
     }
 }

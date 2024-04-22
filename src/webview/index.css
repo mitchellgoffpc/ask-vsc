@@ -21,12 +21,8 @@ body {
     font-size: var(--vscode-font-size);
     font-weight: var(--vscode-font-weight);
     font-family: var(--vscode-font-family);
-    display: flex;
-    flex-direction: column;
-    align-items: stretch;
-    box-sizing: border-box;
     height: 100%;
-    max-height: 100%;
+    box-sizing: border-box;
 }
 
 ol,
@@ -106,6 +102,19 @@ textarea {
 }
 textarea::-webkit-scrollbar {
     width: 0 !important;
+}
+
+/* Sidebar */
+
+#root {
+    height: 100%;
+}
+.sidebar {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    height: 100%;
+    max-height: 100%;
 }
 
 
@@ -218,7 +227,6 @@ textarea::-webkit-scrollbar {
 }
 
 .chat-input .settings .model-options {
-    display: none;
     position: absolute;
     bottom: 100%;
     right: 0;
@@ -227,9 +235,6 @@ textarea::-webkit-scrollbar {
     border-radius: 3px;
     overflow: hidden;
     white-space: nowrap;
-}
-.chat-input .settings .model-select.open .model-options {
-    display: block;
 }
 
 .chat-input .settings .model-options > div {
@@ -260,7 +265,6 @@ textarea::-webkit-scrollbar {
     position: absolute;
     left: 0;
     bottom: 100%;
-    display: none;
     background-color: var(--vscode-input-background);
 }
 .chat-input .autocomplete .option {

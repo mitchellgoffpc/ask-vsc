@@ -31,13 +31,16 @@ export default class ChatViewProvider implements vscode.WebviewViewProvider {
 
     handleMessage = async (data: any) => {
         if (data.action === 'submit') {
+            await this.store.pushHistory(data.value);
+            this.view?.webview.postMessage({ action: 'state', value: this.store.getState(), resetHistory: true });
             await this.handleSubmit(data.value);
         } else if (data.action === "approve") {
             await this.handleApproveDiff(data.diff);
-        } else if (data.action === "model") {
-            this.store.setModel(data.value);
-        } else if (data.action === "getstate") {
+        } else if (data.action === "setmodel") {
+            await this.store.setModel(data.value);
             this.view?.webview.postMessage({ action: 'state', value: this.store.getState() });
+        } else if (data.action === "getstate") {
+            this.view?.webview.postMessage({ action: 'state', value: this.store.getState(), resetHistory: true });
         } else if (data.action === 'gettabs') {
             const tabGroups = vscode.window.tabGroups.all;
             const tabNames = tabGroups.flatMap(group => group.tabs.map(tab => tab.label));
@@ -50,7 +53,7 @@ export default class ChatViewProvider implements vscode.WebviewViewProvider {
                 const files = await vscode.workspace.fs.readDirectory(uri);
                 const filePaths = files
                     .filter(x => !x[0].startsWith('.'))
-                    .map(([filename, type]) => [`${prefix}${filename}`, type === vscode.FileType.Directory]);
+                    .map(([filename, type]) => ({path: `${prefix}${filename}`, isDir: type === vscode.FileType.Directory}));
                 this.view?.webview.postMessage({ action: 'getfiles', value: filePaths });
             } catch (error) {
                 this.view?.webview.postMessage({ action: 'getfiles', value: [] });
@@ -89,13 +92,12 @@ export default class ChatViewProvider implements vscode.WebviewViewProvider {
     async handleSubmit(message: string) {
         try {
             this.abortRequest();
-            this.view?.webview.postMessage({ action: 'clear' });
-            this.view?.webview.postMessage({ action: 'message', role: "user", value: message });
-            this.view?.webview.postMessage({ action: 'message', role: "agent", value: "" });
+            await this.store.setMessages([{role: 'user', content: message}, {role: 'agent', content: ''}]);
+            await this.view?.webview.postMessage({ action: 'state', value: this.store.getState() });
             for await (let update of ask(message, this.store.getFiles(), this.store.getModel(), this.controller)) {
-                this.view?.webview.postMessage({ action: 'message-update', role: "agent", value: update });
+                await this.store.setMessages([{role: 'user', content: message}, {role: 'agent', content: update}]);
+                await this.view?.webview.postMessage({ action: 'state', value: this.store.getState() });
             }
-            this.view?.webview.postMessage({ action: 'message-done' });
         } catch (error: any) {
             if (error instanceof APIKeyError) {
                 vscode.window.showErrorMessage(error.message, {}, {title: "Settings"}, {title: "Cancel"}).then(selection => {
@@ -212,8 +214,7 @@ export default class ChatViewProvider implements vscode.WebviewViewProvider {
 
     getHtmlForWebview(webview: vscode.Webview): string {
         // Get the local path to main script run in the webview, then convert it to a uri we can use in the webview.
-        const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'out', 'webview', 'main.js'));
-        const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'src', 'webview', 'main.css'));
+        const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'out', 'main.wv.js'));
         const codiconsUri = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'node_modules', '@vscode/codicons', 'dist', 'codicon.css'));
 
         // Use a nonce to only allow a specific script to be run.
@@ -224,36 +225,14 @@ export default class ChatViewProvider implements vscode.WebviewViewProvider {
                 <html lang="en">
                 <head>
                     <meta charset="UTF-8">
-                    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; font-src ${webview.cspSource}; style-src ${webview.cspSource}; script-src 'nonce-${nonce}';">
+                    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; font-src ${webview.cspSource}; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';">
                     <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-                    <link href="${styleUri}" rel="stylesheet">
                     <link href="${codiconsUri}" rel="stylesheet">
                 </head>
                 <body>
-                    <div class="chat-files"></div>
-                    <div class="chat-output"></div>
+                    <div id="root"></div>
 
-                    <div class="chat-input">
-                        <div class="settings">
-                            <div class="model-select">
-                                <span class="model-name"></span>
-                                <i class="codicon codicon-chevron-up"></i>
-                                <div class="model-options">
-                                    ${MODELS.map(model =>`<div data-value="${model.name}">${model.name}</div>`).join('')}
-                                </div>
-                            </div>
-                        </div>
-                        <div class="input-box">
-                            <textarea placeholder="Ask a question!" class="message"></textarea>
-                            <div class="submit">
-                                <i class="codicon codicon-send"></i>
-                            </div>
-                            <div class="autocomplete"></div>
-                        </div>
-                    </div>
-
-                    <script nonce="${nonce}">exports = {};</script>
                     <script nonce="${nonce}" src="${scriptUri}"></script>
                 </body>
             </html>`;
