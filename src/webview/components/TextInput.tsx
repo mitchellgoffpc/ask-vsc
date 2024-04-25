@@ -189,7 +189,10 @@ export default function TextInput() {
     // Effects
 
     useEffect(() => {
-        if (textAreaRef.current) { autogrow(textAreaRef.current); }
+        if (textAreaRef.current) {
+            autogrow(textAreaRef.current);
+            textAreaRef.current.focus();
+        }
     }, [textAreaRef, text]);
 
     useEffect(() => {

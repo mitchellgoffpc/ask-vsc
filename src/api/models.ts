@@ -45,7 +45,7 @@ export const APIS: { [key: string]: API } = {
 export const MODELS: Model[] = [
     {id: 'gpt-3.5-turbo', name: 'GPT 3.5 Turbo', api: APIS.OpenAI},
     {id: 'gpt-4', name: "GPT 4", api: APIS.OpenAI},
-    {id: 'gpt-4-turbo-preview', name: "GPT 4 Turbo", api: APIS.OpenAI},
+    {id: 'gpt-4-turbo', name: "GPT 4 Turbo", api: APIS.OpenAI},
     {id: 'open-mixtral-8x7b', name: "Mixtral", api: APIS.Mistral},
     {id: 'mistral-medium-latest', name: "Mistral Medium", api: APIS.Mistral},
     {id: 'mistral-large-latest', name: "Mistral Large", api: APIS.Mistral},

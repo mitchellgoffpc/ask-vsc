@@ -114,6 +114,14 @@ export default class ChatViewProvider implements vscode.WebviewViewProvider {
     }
 
     async handleApproveDiff(diff: string) {
+        let tabs = vscode.window.tabGroups.all.flatMap(group => group.tabs);
+        let tabsByFilePath: {[key: string]: vscode.Tab} = {};
+        for (let tab of tabs) {
+            if (isValidTab(tab.input)) {
+                tabsByFilePath[tab.input.uri.path] = tab;
+            }
+        }
+
         const parsedDiff = Diff.parsePatch(diff);
         const changes = parsedDiff.flatMap(file => {
             let oldFileURI = file.oldFileName ? resolveFileURI(file.oldFileName) : undefined;
@@ -133,14 +141,6 @@ export default class ChatViewProvider implements vscode.WebviewViewProvider {
                 return [{ oldFileURI, newFileURI, search: '', replace: '' }];
             }
         });
-
-        let tabs = vscode.window.tabGroups.all.flatMap(group => group.tabs);
-        let tabsByFilePath: {[key: string]: vscode.Tab} = {};
-        for (let tab of tabs) {
-            if (isValidTab(tab.input)) {
-                tabsByFilePath[tab.input.uri.path] = tab;
-            }
-        }
 
         for (let change of changes) {
             if (!change.oldFileURI || !change.newFileURI) {
