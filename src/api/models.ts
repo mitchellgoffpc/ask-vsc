@@ -1,3 +1,8 @@
+enum EditingStrategy {
+    UDIFF = "UDIFF",
+    REPLACE = "REPLACE",
+}
+
 class API {
     constructor(public url: string, public key: string) { }
 

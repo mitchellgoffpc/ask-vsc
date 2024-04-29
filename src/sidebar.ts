@@ -1,9 +1,8 @@
 import path from 'path';
 import * as vscode from 'vscode';
 import * as Diff from 'diff';
-import { MODELS, Model } from './api/models';
 import { APIKeyError, APIResponseError } from './api/query';
-import { Document, isNotebookDocument, isValidTab, resolveFileURI, getNonce, openDocumentFromTab, createFile, deleteFile, fileExists } from './helpers';
+import { isNotebookDocument, isValidTab, resolveFileURI, getNonce, openDocumentFromTab, createFile, deleteFile, fileExists } from './helpers';
 import { ask } from './query';
 import { Store } from './store';
 

@@ -1,7 +1,9 @@
 .vscode/**
+.vscode-test/**
 .gitignore
 **/tsconfig.json
 **/webpack.config.ts
 **/.eslintrc.json
 **/*.map
 **/*.ts
+**/*.test.js

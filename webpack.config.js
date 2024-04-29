@@ -2,6 +2,7 @@
 'use strict';
 
 const path = require('path');
+const glob = require('glob');
 
 /**@type {import('webpack').Configuration}*/
 const extConfig = {
@@ -38,4 +39,17 @@ const webviewConfig = {
   },
 };
 
-module.exports = [extConfig, webviewConfig];
+/**@type {import('webpack').Configuration}*/
+const testConfig = {
+  target: 'node',
+  entry: glob.sync("./test/**/*.test.ts").map(f => path.resolve(__dirname, f)),
+  output: {
+    filename: '[name].test.js',
+    path: path.resolve(__dirname, 'out')
+  },
+  resolve: { extensions: ['.ts', '.js'] },
+  module: { rules: [{ test: /\.ts$/, loader: 'ts-loader' }] },
+  externals: { vscode: 'vscode' },
+};
+
+module.exports = [extConfig, webviewConfig, testConfig];

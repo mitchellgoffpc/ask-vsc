@@ -1,8 +1,9 @@
 import * as vscode from 'vscode';
 import { Model } from './api/models';
 import { query } from './api/query';
-import { Document, isNotebookDocument, isValidTab, openDocumentFromTab, getSelectedText, resolveFileURI, getLocalPath } from './helpers';
-import * as Prompts from './prompts';
+import { Document, isNotebookDocument, getLocalPath } from './helpers';
+import * as CommonPrompts from './prompts/common';
+import * as EditingPrompts from './prompts/udiff';
 
 type Message = {
     type: "prompt" | "code";
@@ -80,17 +81,18 @@ export async function* ask(question: string, files: vscode.Uri[], model: Model, 
     const activeDocument = vscode.window.activeNotebookEditor?.notebook || activeEditor?.document;
     if (question) {
         const systemPrompt = createPrompt([
-            { type: "prompt", text: Prompts.SYSTEM },
-            { type: "prompt", text: Prompts.EDITING_RULES },
+            { type: "prompt", text: EditingPrompts.SYSTEM },
+            { type: "prompt", text: EditingPrompts.EDITING_RULES },
         ]);
         const userPrompt = createPrompt([
-            { type: "prompt", text: Prompts.NO_REPO },
-            { type: "prompt", text: Prompts.FILE_CONTENT },
+            { type: "prompt", text: CommonPrompts.NO_REPO },
+            { type: "prompt", text: CommonPrompts.FILE_CONTENT },
             ...await getCodeMessages(activeDocument, files),
             { type: "prompt", text: question },
         ]);
 
-        // console.log(userPrompt);
+        console.log(systemPrompt);
+        console.log(userPrompt);
         // const selectedText = getSelectedText(activeEditor);
         // const actionMessages: Message[] = selectedText ? [
         //     { type: "prompt", text: "The following is the code I have currently selected." },
